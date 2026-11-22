@@ -233,8 +233,7 @@ final class GameView: UIView {
             }
         case .gamble:
             let elapsed = now - gambleStartTime
-            gambleText = (Int(elapsed * 12) % 2 == 0) ? "大" : "小"
-            // 押大小：左右竖排红灯交替，先快后慢（安卓 ae[15]=3500ms）
+            // 押大小：左右竖排红灯与大/小文字一起按“先快后慢”交替
             let total = 3.5
             let progress = min(1, elapsed / total)
             let interval = 0.05 + 0.36 * pow(progress, 2.4)
@@ -242,6 +241,7 @@ final class GameView: UIView {
             if gambleLampTimer >= interval {
                 gambleLampTimer = 0
                 gambleSide = 1 - gambleSide
+                gambleText = (gambleSide == 0) ? "大" : "小"
             }
             if elapsed >= total {
                 resolveGamble()
@@ -376,10 +376,11 @@ final class GameView: UIView {
             maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
         }
 
-        // 中奖高亮（仅原始停下的那一格覆盖遮罩）+ 大奖项横幅
+        // 中奖高亮（开火车等大奖项为多格，覆盖所有中奖格）+ 大奖项横幅
         if phase == .result {
-            if spinLanding >= 0, spinLanding < GameView.tiles.count {
-                let p = GameView.tiles[spinLanding]
+            for index in resultPositions {
+                guard index >= 0, index < GameView.tiles.count else { continue }
+                let p = GameView.tiles[index]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
             drawBanner(now: CACurrentMediaTime())

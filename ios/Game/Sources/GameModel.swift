@@ -184,37 +184,43 @@ final class GameModel {
         // 2. 计算 23 种中奖组合的金额
         var outs = [Int](repeating: 0, count: 23)
         for i in 0..<16 { outs[i] = betAmount(for: i) }
-        outs[16] = betAmount(for: 4) + betAmount(for: 5) + betAmount(for: 6)
-        outs[17] = betAmount(for: 1) + betAmount(for: 2) + betAmount(for: 3)
-        outs[18] = betAmount(for: 0) * 4
-        var sumAll = 0
-        for g in 0..<8 { sumAll += bets[g] * GameModel.mult[g] }
-        outs[19] = sumAll
-        outs[20] = bets[0] * GameModel.mult[0] + bets[7] * GameModel.mult[14] + (1...6).reduce(0) { $0 + bets[$1] * 2 }
 
-        // 21：随机连续 3~6 格
-        let w21 = Int.random(in: 0..<4) + 3
-        let v21 = Int.random(in: 0..<24)
-        var pos21: [Int] = []
-        var sum21 = 0
-        for k in 0..<w21 {
-            let p = ((v21 - k) % 24 + 24) % 24
-            pos21.append(p)
-            sum21 += betAmount(for: GameModel.symbols[p])
-        }
-        outs[21] = sum21
-
-        // 22：随机 5~11 个不同格
-        var w22 = Int.random(in: 0..<7) + 5
-        if Int.random(in: 0..<100) < 20 { w22 = 0 }
-        var pos22: [Int] = []
-        var sum22 = 0
-        var guardCount = 0
-        while pos22.count < w22 && guardCount < 500 {
-            guardCount += 1
+        // 16：龙 —— 5~11 个不同格（20% 概率 0 格）
+        var w16 = Int.random(in: 0..<7) + 5
+        if Int.random(in: 0..<100) < 20 { w16 = 0 }
+        var pos16: [Int] = []
+        var sum16 = 0
+        var guard16 = 0
+        while pos16.count < w16 && guard16 < 500 {
+            guard16 += 1
             let p = Int.random(in: 0..<24)
             if GameModel.symbols[p] == 16 { continue }
-            if pos22.contains(p) { continue }
+            if pos16.contains(p) { continue }
+            pos16.append(p)
+            sum16 += betAmount(for: GameModel.symbols[p])
+        }
+        outs[16] = sum16
+
+        // 17：大三元（符号 4/5/6）
+        outs[17] = betAmount(for: 4) + betAmount(for: 5) + betAmount(for: 6)
+        // 18：小三元（符号 1/2/3）
+        outs[18] = betAmount(for: 1) + betAmount(for: 2) + betAmount(for: 3)
+        // 19：小四喜（符号 0 × 4）
+        outs[19] = betAmount(for: 0) * 4
+        // 20：大满贯（8 组全中）
+        var sum20 = 0
+        for g in 0..<8 { sum20 += bets[g] * GameModel.mult[g] }
+        outs[20] = sum20
+        // 21：小满贯
+        outs[21] = bets[0] * GameModel.mult[0] + bets[7] * GameModel.mult[14] + (1...6).reduce(0) { $0 + bets[$1] * 2 }
+
+        // 22：开火车 —— 随机连续 3~6 格
+        let w22 = Int.random(in: 0..<4) + 3
+        let v22 = Int.random(in: 0..<24)
+        var pos22: [Int] = []
+        var sum22 = 0
+        for k in 0..<w22 {
+            let p = ((v22 - k) % 24 + 24) % 24
             pos22.append(p)
             sum22 += betAmount(for: GameModel.symbols[p])
         }
@@ -254,30 +260,25 @@ final class GameModel {
         case 0...15:
             positions = randomPosition(of: type)
         case 16:
-            positions = []
+            positions = pos16
         case 17:
             positions = randomPosition(of: 4) + randomPosition(of: 5) + randomPosition(of: 6)
         case 18:
             positions = randomPosition(of: 1) + randomPosition(of: 2) + randomPosition(of: 3)
         case 19:
-            var used: [Int] = []
-            for _ in 0..<4 {
-                var p = Int.random(in: 0..<24)
-                var tries = 0
-                while (used.contains(p) || GameModel.symbols[p] == 16) && tries < 100 {
-                    p = Int.random(in: 0..<24)
-                    tries += 1
-                }
-                used.append(p)
-                positions.append(p)
-            }
+            // 小四喜：4 格全是符号 0
+            positions = GameModel.symbols.enumerated().compactMap { $0.element == 0 ? $0.offset : nil }
         case 20:
+            // 大满贯：8 格（符号 0~7 各一格）
             for g in 0..<8 {
-                let symbol = (g == 0) ? 0 : (g == 7 ? 14 : g + 7)
-                positions += randomPosition(of: symbol)
+                positions += randomPosition(of: g)
             }
         case 21:
-            positions = pos21
+            // 小满贯：符号 0、14 及 8~13 各一格
+            positions = randomPosition(of: 0) + randomPosition(of: 14)
+            for s in 8..<14 {
+                positions += randomPosition(of: s)
+            }
         default:
             positions = pos22
         }
