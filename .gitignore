@@ -3,6 +3,7 @@ recharge-backend/
 
 # 构建产物
 ios/build/
+ipa/
 build/
 
 # 反编译中间文件与原包
