@@ -1,0 +1,21 @@
+# 后台源码含签名密钥，不进公开仓库
+recharge-backend/
+
+# 构建产物
+ios/build/
+build/
+
+# 反编译中间文件与原包
+original/
+smali/
+unknown/
+assets/
+res/
+AndroidManifest.xml
+apktool.yml
+
+# 数据库与临时文件
+*.db
+*.log
+*.tmp
+__pycache__/

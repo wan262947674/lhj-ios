@@ -1,0 +1,37 @@
+name: build-ipa
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ipa.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境信息
+        run: |
+          xcode-select -p
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: 编译并打包 IPA
+        run: |
+          chmod +x ios/build-ipa.sh
+          ./ios/build-ipa.sh
+
+      - name: 校验产物
+        run: |
+          ls -lh ios/build/
+          unzip -l ios/build/LHJ-unsigned.ipa | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LHJ-unsigned-ipa
+          path: ios/build/LHJ-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

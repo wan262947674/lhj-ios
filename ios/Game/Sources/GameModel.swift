@@ -1,0 +1,258 @@
+import Foundation
+
+/// 与安卓版一致的核心数据与开奖逻辑
+final class GameModel {
+
+    static let shared = GameModel()
+
+    // 盘面 24 格对应的符号（索引与 GameBody.e 完全一致）
+    static let symbols: [Int] = [
+        1, 3, 15, 7, 14, 0, 2, 4, 11, 16, 0, 8,
+        1, 3, 13, 6, 0, 9, 2, 5, 12, 16, 0, 10
+    ]
+    // 符号倍率（GameBody.j）
+    static let mult: [Int] = [5, 10, 15, 20, 20, 30, 40, 100, 2, 2, 2, 2, 2, 2, 25, 50]
+    // 出奖档位权重（GameBody.a）
+    static let buckets: [Int] = [838, 139, 20, 2, 1]
+    // 档位返奖系数（GameBody.b），按 1/100 点计
+    static let poolRatio: [Int] = [25, 100, 1000, 10000, 22000]
+
+    private let defaults = UserDefaults.standard
+
+    private(set) var score: Int64 = 10
+    private(set) var win: Int64 = 0
+    private(set) var topScore: Int64 = 0
+    private(set) var bets = [Int](repeating: 0, count: 8)
+    private var pool: Int64 = 0
+
+    var soundDisabled: Bool {
+        didSet { defaults.set(soundDisabled, forKey: "disSnd") }
+    }
+    var vibrateDisabled: Bool {
+        didSet { defaults.set(vibrateDisabled, forKey: "disVib") }
+    }
+
+    private init() {
+        soundDisabled = defaults.bool(forKey: "disSnd")
+        vibrateDisabled = defaults.bool(forKey: "disVib")
+        if defaults.object(forKey: "curScore") != nil {
+            score = Int64(defaults.double(forKey: "curScore"))
+            topScore = Int64(defaults.double(forKey: "topScore"))
+            win = Int64(defaults.double(forKey: "win"))
+            if score < 0 { score = 0 }
+        } else {
+            score = 10
+            save()
+        }
+    }
+
+    // MARK: - 下注
+
+    static func group(for symbol: Int) -> Int {
+        if symbol < 8 { return symbol }
+        if symbol == 15 { return 7 }
+        return symbol - 7
+    }
+
+    func betAmount(for symbol: Int) -> Int {
+        if symbol == 16 { return 0 }
+        let g = GameModel.group(for: symbol)
+        guard g >= 0, g < bets.count else { return 0 }
+        return bets[g] * GameModel.mult[symbol]
+    }
+
+    var totalBet: Int { bets.reduce(0, +) }
+    var betKinds: Int { bets.filter { $0 > 0 }.count }
+
+    @discardableResult
+    func addBet(group: Int) -> Bool {
+        guard group >= 0, group < bets.count else { return false }
+        guard bets[group] < 99 else { return false }
+        guard score >= 1 else { return false }
+        score -= 1
+        bets[group] += 1
+        save()
+        return true
+    }
+
+    func clearBets() {
+        bets = [Int](repeating: 0, count: 8)
+        save()
+    }
+
+    // MARK: - 结算
+
+    func setWin(_ value: Int64) {
+        win = max(0, value)
+        save()
+    }
+
+    func collectWin() {
+        guard win > 0 else { return }
+        score += win
+        if score > topScore { topScore = score }
+        win = 0
+        save()
+    }
+
+    func addPoints(_ value: Int64) {
+        guard value > 0 else { return }
+        score += value
+        if score > topScore { topScore = score }
+        save()
+    }
+
+    /// 开始游戏时扣除本轮总注
+    func spend(_ value: Int64) {
+        guard value > 0 else { return }
+        score = max(0, score - value)
+        save()
+    }
+
+    private func save() {
+        defaults.set(Double(score), forKey: "curScore")
+        defaults.set(Double(topScore), forKey: "topScore")
+        defaults.set(Double(win), forKey: "win")
+    }
+
+    // MARK: - 开奖
+
+    struct Outcome {
+        let type: Int          // u
+        let positions: [Int]   // 中奖格
+        let payout: Int64
+        let landing: Int       // 跑灯停下的格
+    }
+
+    private func randomPosition(of symbol: Int) -> [Int] {
+        let candidates = GameModel.symbols.enumerated().compactMap { $0.element == symbol ? $0.offset : nil }
+        guard let p = candidates.randomElement() else { return [] }
+        return [p]
+    }
+
+    func spin() -> Outcome {
+        let total = totalBet
+        let totalKind = betKinds
+
+        // 1. 按权重选出档位
+        let r = Int.random(in: 0..<1000)
+        var level = 0
+        var acc = 0
+        for i in 0..<GameModel.buckets.count {
+            acc += GameModel.buckets[i]
+            if r < acc { level = i; break }
+        }
+        pool += Int64(GameModel.poolRatio[level] * total)
+        let target = Int(clamping: pool / 100)
+
+        // 2. 计算 23 种中奖组合的金额
+        var outs = [Int](repeating: 0, count: 23)
+        for i in 0..<16 { outs[i] = betAmount(for: i) }
+        outs[16] = betAmount(for: 4) + betAmount(for: 5) + betAmount(for: 6)
+        outs[17] = betAmount(for: 1) + betAmount(for: 2) + betAmount(for: 3)
+        outs[18] = betAmount(for: 0) * 4
+        var sumAll = 0
+        for g in 0..<8 { sumAll += bets[g] * GameModel.mult[g] }
+        outs[19] = sumAll
+        outs[20] = bets[0] * GameModel.mult[0] + bets[7] * GameModel.mult[14] + (1...6).reduce(0) { $0 + bets[$1] * 2 }
+
+        // 21：随机连续 3~6 格
+        let w21 = Int.random(in: 0..<4) + 3
+        let v21 = Int.random(in: 0..<24)
+        var pos21: [Int] = []
+        var sum21 = 0
+        for k in 0..<w21 {
+            let p = ((v21 - k) % 24 + 24) % 24
+            pos21.append(p)
+            sum21 += betAmount(for: GameModel.symbols[p])
+        }
+        outs[21] = sum21
+
+        // 22：随机 5~11 个不同格
+        var w22 = Int.random(in: 0..<7) + 5
+        if Int.random(in: 0..<100) < 20 { w22 = 0 }
+        var pos22: [Int] = []
+        var sum22 = 0
+        var guardCount = 0
+        while pos22.count < w22 && guardCount < 500 {
+            guardCount += 1
+            let p = Int.random(in: 0..<24)
+            if GameModel.symbols[p] == 16 { continue }
+            if pos22.contains(p) { continue }
+            pos22.append(p)
+            sum22 += betAmount(for: GameModel.symbols[p])
+        }
+        outs[22] = sum22
+
+        // 3. 特殊情况优先（与 GameBody.cal 一致：大三元奖池可负担且超过总注 10 倍）
+        var type = -1
+        if total > 0 {
+            let bigRatio = outs[20] / total
+            if Int.random(in: 0..<100) < 20,
+               outs[20] <= target, bigRatio > 10, totalKind >= 4 {
+                type = 20
+            } else if Int.random(in: 0..<100) < 20,
+                      outs[17] <= target, bigRatio > 10, totalKind >= 2 {
+                type = 17
+            } else if Int.random(in: 0..<100) < 20,
+                      outs[22] <= target, bigRatio > 10, w22 > 3 {
+                type = 22
+            }
+        }
+
+        // 4. 按“返奖池”阈值随机挑一个组合
+        let minOut = outs.min() ?? 0
+        let threshold = max(target, minOut)
+        if type < 0 {
+            var tries = 0
+            repeat {
+                type = Int.random(in: 0..<23)
+                tries += 1
+            } while outs[type] > threshold && tries < 300
+        }
+        pool -= Int64(100 * outs[type])
+
+        // 5. 生成中奖格
+        var positions: [Int] = []
+        switch type {
+        case 0...15:
+            positions = randomPosition(of: type)
+        case 16:
+            positions = []
+        case 17:
+            positions = randomPosition(of: 4) + randomPosition(of: 5) + randomPosition(of: 6)
+        case 18:
+            positions = randomPosition(of: 1) + randomPosition(of: 2) + randomPosition(of: 3)
+        case 19:
+            var used: [Int] = []
+            for _ in 0..<4 {
+                var p = Int.random(in: 0..<24)
+                var tries = 0
+                while (used.contains(p) || GameModel.symbols[p] == 16) && tries < 100 {
+                    p = Int.random(in: 0..<24)
+                    tries += 1
+                }
+                used.append(p)
+                positions.append(p)
+            }
+        case 20:
+            for g in 0..<8 {
+                let symbol = (g == 0) ? 0 : (g == 7 ? 14 : g + 7)
+                positions += randomPosition(of: symbol)
+            }
+        case 21:
+            positions = pos21
+        default:
+            positions = pos22
+        }
+
+        var payout: Int64 = 0
+        for p in positions {
+            payout += Int64(betAmount(for: GameModel.symbols[p]))
+        }
+
+        let landing = positions.first ?? Int.random(in: 0..<24)
+
+        return Outcome(type: type, positions: positions, payout: payout, landing: landing)
+    }
+}
