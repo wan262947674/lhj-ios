@@ -386,10 +386,6 @@ final class GameView: UIView {
             drawBanner(now: CACurrentMediaTime())
         }
 
-        if phase == .gamble {
-            drawGamble()
-        }
-
         ctx.restoreGState()
     }
 
@@ -446,34 +442,6 @@ final class GameView: UIView {
         let h = banner.size.height * scaleFactor
         let rect = CGRect(x: 240 - w / 2, y: 400 - h / 2, width: w, height: h)
         banner.draw(in: rect, blendMode: .normal, alpha: alpha)
-    }
-
-    private func drawGamble() {
-        let box = CGRect(x: 70, y: 270, width: 340, height: 190)
-        let path = UIBezierPath(roundedRect: box, cornerRadius: 12)
-        UIColor(white: 0, alpha: 0.72).setFill()
-        path.fill()
-        UIColor(red: 0xf5 / 255.0, green: 0xc4 / 255.0, blue: 0x51 / 255.0, alpha: 0.8).setStroke()
-        path.lineWidth = 2
-        path.stroke()
-
-        let hint = "押\(gambleBig ? "大" : "小")：赢则翻倍"
-        let hintAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 17),
-            .foregroundColor: UIColor(red: 0xe8 / 255.0, green: 0xd9 / 255.0, blue: 0xb0 / 255.0, alpha: 1)
-        ]
-        let hintSize = (hint as NSString).size(withAttributes: hintAttrs)
-        (hint as NSString).draw(at: CGPoint(x: 240 - hintSize.width / 2, y: 288),
-                                withAttributes: hintAttrs)
-
-        let text = gambleText.isEmpty ? "大" : gambleText
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 90),
-            .foregroundColor: UIColor(red: 0xf5 / 255.0, green: 0xc4 / 255.0, blue: 0x51 / 255.0, alpha: 1)
-        ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(at: CGPoint(x: 240 - size.width / 2, y: 318),
-                                withAttributes: attrs)
     }
 
     private func drawNumber(_ value: Int64, rightEdge: CGFloat, y: CGFloat,
