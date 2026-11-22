@@ -16,6 +16,8 @@ final class GameModel {
     static let buckets: [Int] = [838, 139, 20, 2, 1]
     // 档位返奖系数（GameBody.b），按 1/100 点计
     static let poolRatio: [Int] = [25, 100, 1000, 10000, 22000]
+    // 特殊奖触发概率（LhjConfig.winRate，后台可调，默认 20）
+    static var winRate = 20
 
     private let defaults = UserDefaults.standard
 
@@ -122,6 +124,7 @@ final class GameModel {
         let positions: [Int]   // 中奖格
         let payout: Int64
         let landing: Int       // 跑灯停下的格
+        let landingSymbol: Int // 停下那格的图案
     }
 
     private func randomPosition(of symbol: Int) -> [Int] {
@@ -188,13 +191,13 @@ final class GameModel {
         var type = -1
         if total > 0 {
             let bigRatio = outs[20] / total
-            if Int.random(in: 0..<100) < 20,
+            if Int.random(in: 0..<100) < GameModel.winRate,
                outs[20] <= target, bigRatio > 10, totalKind >= 4 {
                 type = 20
-            } else if Int.random(in: 0..<100) < 20,
+            } else if Int.random(in: 0..<100) < GameModel.winRate,
                       outs[17] <= target, bigRatio > 10, totalKind >= 2 {
                 type = 17
-            } else if Int.random(in: 0..<100) < 20,
+            } else if Int.random(in: 0..<100) < GameModel.winRate,
                       outs[22] <= target, bigRatio > 10, w22 > 3 {
                 type = 22
             }
@@ -253,6 +256,7 @@ final class GameModel {
 
         let landing = positions.first ?? Int.random(in: 0..<24)
 
-        return Outcome(type: type, positions: positions, payout: payout, landing: landing)
+        return Outcome(type: type, positions: positions, payout: payout,
+                       landing: landing, landingSymbol: GameModel.symbols[landing])
     }
 }

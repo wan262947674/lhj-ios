@@ -1,4 +1,5 @@
 import UIKit
+import WebKit
 
 /// 排行榜 / 成就 / 观看广告 / 积分兑换 / 购买卡密 的通用联网页（对接 8080 后台）
 final class LHJWebViewController: UIViewController, UITextFieldDelegate {
@@ -23,6 +24,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         static var autoInterval = 60
         static var helpText = ""
         static var moreURL = ""
+        static var winRate = 20
     }
 
     /// 玩家当前积分（后台 points）
@@ -296,12 +298,16 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             Config.helpText = fields[8]
             Config.moreURL = fields[9]
         }
+        if fields.count >= 11, let rate = Int(fields[10]) {
+            Config.winRate = rate
+            GameModel.winRate = rate
+        }
 
         if self.action == .buy {
             if let url = URL(string: Config.buyURL), !Config.buyURL.isEmpty {
-                UIApplication.shared.open(url, options: [:]) { _ in
-                    self.dismiss(animated: true, completion: nil)
-                }
+                let page = LHJWebPageController(title: "购买卡密", url: url)
+                page.modalPresentationStyle = .fullScreen
+                self.present(page, animated: true, completion: nil)
             } else {
                 contentView.text = "卡密购买地址暂未配置，请联系客服QQ：4711851"
             }
@@ -368,6 +374,10 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                     Config.helpText = fields[8]
                     Config.moreURL = fields[9]
                 }
+                if fields.count >= 11, let rate = Int(fields[10]) {
+                    Config.winRate = rate
+                    GameModel.winRate = rate
+                }
             }
         }.resume()
     }
@@ -429,7 +439,15 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             contentView.text = "广告地址暂未配置，请联系客服QQ：4711851"
             return
         }
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        // 与安卓一致：在应用内 WebView 打开广告页，返回后领取奖励
+        let page = LHJWebPageController(title: "免费获取积分", url: url)
+        page.modalPresentationStyle = .fullScreen
+        page.onClose = { [weak self] in
+            self?.adWatched = true
+            self?.claimButton.isEnabled = true
+            self?.contentView.text = "广告已看完，请点击“领取奖励”。"
+        }
+        present(page, animated: true, completion: nil)
         adWatched = true
         claimButton.isEnabled = true
         contentView.text = "广告已打开，看完后返回点击“领取奖励”。"
@@ -454,5 +472,90 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
         return true
+    }
+}
+
+/// 应用内网页（广告 / 购买卡密 / 更多游戏），对应安卓 LhjWebActivity、MoreActivity
+final class LHJWebPageController: UIViewController, WKNavigationDelegate {
+
+    var onClose: (() -> Void)?
+
+    private let pageTitle: String
+    private let pageURL: URL
+    private let webView = WKWebView(frame: .zero)
+    private let titleLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let indicator = UIActivityIndicatorView(style: .large)
+
+    init(title: String, url: URL) {
+        self.pageTitle = title
+        self.pageURL = url
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var prefersStatusBarHidden: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red: 0x11 / 255.0, green: 0x11 / 255.0,
+                                      blue: 0x11 / 255.0, alpha: 1)
+
+        titleLabel.text = pageTitle
+        titleLabel.textColor = UIColor(red: 0xf5 / 255.0, green: 0xc4 / 255.0, blue: 0x51 / 255.0, alpha: 1)
+        titleLabel.font = UIFont.boldSystemFont(ofSize: 20)
+        titleLabel.textAlignment = .center
+        view.addSubview(titleLabel)
+
+        closeButton.setTitle("关闭", for: .normal)
+        closeButton.setTitleColor(UIColor(red: 0xe9 / 255.0, green: 0xdc / 255.0, blue: 0xc0 / 255.0, alpha: 1),
+                                  for: .normal)
+        closeButton.titleLabel?.font = UIFont.systemFont(ofSize: 16)
+        closeButton.backgroundColor = UIColor(red: 0x22 / 255.0, green: 0x28 / 255.0, blue: 0x33 / 255.0, alpha: 1)
+        closeButton.layer.cornerRadius = 6
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        view.addSubview(closeButton)
+
+        webView.backgroundColor = .black
+        webView.navigationDelegate = self
+        view.addSubview(webView)
+
+        indicator.color = .white
+        indicator.startAnimating()
+        view.addSubview(indicator)
+
+        webView.load(URLRequest(url: pageURL))
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let top = view.safeAreaInsets.top
+        let bottom = view.safeAreaInsets.bottom
+        titleLabel.frame = CGRect(x: 16, y: top + 8, width: view.bounds.width - 32, height: 30)
+        closeButton.frame = CGRect(x: view.bounds.width - 76, y: top + 8, width: 60, height: 30)
+        webView.frame = CGRect(x: 0, y: top + 46,
+                               width: view.bounds.width,
+                               height: view.bounds.height - top - bottom - 46)
+        indicator.center = webView.center
+    }
+
+    @objc private func closeTapped() {
+        onClose?()
+        dismiss(animated: true, completion: nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        indicator.stopAnimating()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        indicator.stopAnimating()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        indicator.stopAnimating()
     }
 }

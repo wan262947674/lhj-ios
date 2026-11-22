@@ -81,6 +81,9 @@ final class GameView: UIView {
     private lazy var bannerDasy = UIImage(named: "dasy.png") ?? UIImage(named: "dasy")
     private lazy var bannerDamg = UIImage(named: "damg.png") ?? UIImage(named: "damg")
     private lazy var bannerKaihc = UIImage(named: "kaihc.png") ?? UIImage(named: "kaihc")
+    private lazy var bannerXiaosy = UIImage(named: "xiaosy.png") ?? UIImage(named: "xiaosy")
+    private lazy var bannerXiaosx = UIImage(named: "xiaosx.png") ?? UIImage(named: "xiaosx")
+    private lazy var bannerXiaomg = UIImage(named: "xiaomg.png") ?? UIImage(named: "xiaomg")
     private lazy var digitImages: [UIImage] = {
         guard let sheet = UIImage(named: "num_big.png") ?? UIImage(named: "num_big"),
               let cg = sheet.cgImage else { return [] }
@@ -224,6 +227,8 @@ final class GameView: UIView {
         lampIndex = spinLanding
         lampBlink = true
         SoundPlayer.shared.stop("loop")
+        // 跑灯停下音效（安卓 onTouch 中固定播放 bs）
+        SoundPlayer.shared.play("bs")
 
         guard let outcome = outcome else {
             phase = .idle
@@ -239,13 +244,21 @@ final class GameView: UIView {
             if !model.vibrateDisabled {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
-            switch outcome.type {
-            case 17:
+
+            // 大奖项横幅音效（安卓 u >= 16 播放 bswin）
+            if outcome.type >= 16 {
                 SoundPlayer.shared.play("bswin")
-            case 20, 22:
-                SoundPlayer.shared.play("bs")
+            }
+            // 停在大西瓜（symbol 16）播放 boom
+            if outcome.type == 16 || outcome.landingSymbol == 16 {
                 SoundPlayer.shared.play("boom")
-            default:
+            }
+            // 中奖音效：普通奖随机 w1~w7；特殊奖 50% win，否则随机 w1~w7
+            let useRandomWin = outcome.type < 14
+                || outcome.type == 4 || outcome.type == 6 || outcome.type == 7
+            if useRandomWin || Int.random(in: 0..<2) == 1 {
+                SoundPlayer.shared.play("w\(Int.random(in: 1...7))")
+            } else {
                 SoundPlayer.shared.play("win")
             }
         } else {
@@ -312,7 +325,10 @@ final class GameView: UIView {
         let image: UIImage?
         switch outcome.type {
         case 17: image = bannerDasy
+        case 18: image = bannerXiaosy
+        case 19: image = bannerXiaosx
         case 20: image = bannerDamg
+        case 21: image = bannerXiaomg
         case 22: image = bannerKaihc
         default: image = nil
         }
@@ -446,7 +462,8 @@ final class GameView: UIView {
     private func placeBet(group: Int) {
         guard group >= 0, group < 8 else { return }
         if model.addBet(group: group) {
-            SoundPlayer.shared.play("in")
+            // 8 个下注格分别对应安卓 s1~s8
+            SoundPlayer.shared.play("s\(group + 1)")
             if !model.vibrateDisabled {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
             }
@@ -539,7 +556,12 @@ final class GameView: UIView {
         phase = .spinning
         lampBlink = true
 
-        SoundPlayer.shared.play("go")
+        // 开火车（type 15）播放 train，其余播放 go
+        if result.type == 15 {
+            SoundPlayer.shared.play("train")
+        } else {
+            SoundPlayer.shared.play("go")
+        }
         SoundPlayer.shared.play("loop", loop: true)
         setNeedsDisplay()
     }
@@ -549,7 +571,6 @@ final class GameView: UIView {
         outcome = nil
         resultPositions = []
         phase = .idle
-        SoundPlayer.shared.play("open")
         setNeedsDisplay()
     }
 
