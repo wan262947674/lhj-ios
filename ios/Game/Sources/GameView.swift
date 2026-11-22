@@ -129,8 +129,11 @@ final class GameView: UIView {
     private var gambleBig = false
     private var gambleText: String = ""
 
-    // 帧计数：用于红灯交替 / 闪烁节奏
-    private var frameCount: Int = 0
+    // 开奖红灯整体闪烁（每 4 帧切换，同安卓 ax）
+    private var lampOn = true
+    // 押大小：左右竖排红灯交替（0 左 / 1 右）
+    private var gambleSide = 0
+    private var gambleLampTimer: TimeInterval = 0
 
     // 长按快速押注
     private var pressedGroup: Int?
@@ -209,20 +212,35 @@ final class GameView: UIView {
         lastFrameTime = now
         if dt > 0.25 { return }
 
-        frameCount += 1
         updateAutoReward(dt)
 
         switch phase {
-        case .idle, .result:
+        case .idle:
             idleTick += dt
             if idleTick >= 0.24 {
                 idleTick = 0
                 lampBlink.toggle()
             }
+        case .result:
+            // 中奖后整圈红灯按 4 帧节奏闪烁（安卓 ax 每 4 帧取反）
+            idleTick += dt
+            if idleTick >= 0.13 {
+                idleTick = 0
+                lampOn.toggle()
+            }
         case .gamble:
             let elapsed = now - gambleStartTime
             gambleText = (Int(elapsed * 12) % 2 == 0) ? "大" : "小"
-            if elapsed >= 1.6 {
+            // 押大小：左右竖排红灯交替，先快后慢
+            let total = 1.9
+            let progress = min(1, elapsed / total)
+            let interval = 0.05 + 0.36 * pow(progress, 2.4)
+            gambleLampTimer += dt
+            if gambleLampTimer >= interval {
+                gambleLampTimer = 0
+                gambleSide = 1 - gambleSide
+            }
+            if elapsed >= total {
                 resolveGamble()
             }
         case .spinning:
@@ -265,9 +283,8 @@ final class GameView: UIView {
     private func finishSpin(now: CFTimeInterval) {
         lampIndex = spinLanding
         lampBlink = true
-        SoundPlayer.shared.stop("loop")
-        // 跑灯停下音效（安卓 onTouch 中固定播放 bs）
-        SoundPlayer.shared.play("bs")
+        lampOn = true
+        idleTick = 0
 
         guard let outcome = outcome else {
             phase = .idle
@@ -334,9 +351,9 @@ final class GameView: UIView {
                                     withAttributes: attributes)
         }
 
-        // 8 个投注格（中奖后随红灯同时闪烁）
+        // 8 个投注格（中奖后随整圈红灯同步闪烁）
         for i in 0..<8 {
-            if phase == .result, !lampBlink { continue }
+            if phase == .result, !lampOn { continue }
             drawNumber(Int64(model.bets[i]),
                        rightEdge: GameView.chipX[7 - i],
                        y: 621, minDigits: 2, spacing: 1)
@@ -345,10 +362,10 @@ final class GameView: UIView {
         // 总注
         drawNumber(Int64(model.totalBet), rightEdge: 257, y: 383, minDigits: 2, spacing: 2)
 
-        // 跑灯 / 红灯（含押大小交替、中奖快闪）
+        // 跑灯 / 红灯（含押大小交替、中奖整体闪烁）
         drawLamps()
 
-        // 旋转中：移动格叠加遮罩（安卓 e(Canvas) 的格子遮挡素材）
+        // 旋转中：移动格叠加遮罩，与跑灯同一格同步（安卓 c(Canvas, aW)）
         if phase == .spinning, lampIndex >= 0, lampIndex < GameView.tiles.count {
             let p = GameView.tiles[lampIndex]
             maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
@@ -373,31 +390,34 @@ final class GameView: UIView {
         ctx.restoreGState()
     }
 
-    /// 跑灯 / 红灯（对应安卓 a(Canvas) 各阶段绘制）
+    /// 跑灯 / 红灯（对应安卓 c(Canvas) / e(Canvas) 各阶段绘制）
     private func drawLamps() {
         guard let lamp = lampImage else { return }
         func draw(_ i: Int) {
+            guard i >= 0, i < GameView.lamps.count else { return }
             let p = GameView.lamps[i]
             lamp.draw(in: CGRect(x: p.x, y: p.y, width: 24, height: 24))
         }
+        // 左侧竖排（含左上/左下角），同安卓 18..23 + 0
+        let leftBand = [0, 18, 19, 20, 21, 22, 23]
+        // 右侧竖排（含右上/右下角），同安卓 6..12
+        let rightBand = [6, 7, 8, 9, 10, 11, 12]
+
         switch phase {
         case .gamble:
-            // 左右竖排红灯交替显示（每 4 帧换一侧）
-            let side = (frameCount / 4) % 2
-            for i in 0..<GameView.lamps.count where i % 2 == side {
-                draw(i)
-            }
+            // 押大小：左右竖排红灯交替亮，不点亮上下排
+            for i in (gambleSide == 0 ? leftBand : rightBand) { draw(i) }
         case .result:
-            // 中奖：两个竖排红灯一起快速闪烁
-            if frameCount % 2 == 0 {
+            // 中奖：整圈红灯一起闪烁
+            if lampOn {
                 for i in 0..<GameView.lamps.count { draw(i) }
             }
         case .spinning:
-            // 跑灯跟随移动格
-            if lampIndex >= 0, lampIndex < GameView.lamps.count { draw(lampIndex) }
+            // 跑灯：只亮当前移动格对应的那颗灯
+            draw(lampIndex)
         default:
-            // 空闲 / 收分：单灯闪烁
-            if lampBlink, lampIndex >= 0, lampIndex < GameView.lamps.count { draw(lampIndex) }
+            // 空闲：单灯缓慢闪烁
+            if lampBlink { draw(lampIndex) }
         }
     }
 
@@ -633,7 +653,10 @@ final class GameView: UIView {
         gambleText = isBig ? "大" : "小"
         gambleStartTime = CACurrentMediaTime()
         phase = .gamble
-        SoundPlayer.shared.play("go")
+        gambleSide = 0
+        gambleLampTimer = 0
+        // 安卓押大小固定播放 bs
+        SoundPlayer.shared.play("bs")
         setNeedsDisplay()
     }
 
@@ -655,6 +678,8 @@ final class GameView: UIView {
         if success {
             model.setWin(current * 2)
             resultStartTime = CACurrentMediaTime()
+            lampOn = true
+            idleTick = 0
             phase = .result
             SoundPlayer.shared.play("win")
             if !model.vibrateDisabled {
@@ -675,6 +700,10 @@ final class GameView: UIView {
     }
 
     private func startSpin() {
+        // 上一局中奖未收分时先入账（安卓点击开始时 addHoldAndSave）
+        if model.win > 0 {
+            model.collectWin()
+        }
         switch model.tryStart() {
         case .noScore, .insufficient:
             model.clearBets()
@@ -703,13 +732,12 @@ final class GameView: UIView {
         phase = .spinning
         lampBlink = true
 
-        // 开火车（type 15）播放 train，其余播放 go
-        if result.type == 15 {
+        // 开火车（type 22 中大奖）播放 train，其余播放 go（安卓 r() 固定单次播放）
+        if result.type == 22 {
             SoundPlayer.shared.play("train")
         } else {
             SoundPlayer.shared.play("go")
         }
-        SoundPlayer.shared.play("loop", loop: true)
         setNeedsDisplay()
     }
 
