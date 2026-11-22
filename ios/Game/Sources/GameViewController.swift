@@ -107,13 +107,12 @@ final class GameViewController: UIViewController, GameViewDelegate {
     }
 
     private func openMoreGames() {
-        hideMenu()
         // 与安卓 MoreActivity 一致：默认打开推荐页，后台配置了地址则优先使用
         let fallback = "http://www.baolei.in:8080/RecommendApk/more.htm"
         let configured = LHJWebViewController.Config.moreURL
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let address = configured.isEmpty ? fallback : configured
-        guard let url = URL(string: address) else { return }
+        guard let url = LHJWebViewController.normalizedURL(address) else { return }
         let page = LHJWebPageController(title: "更多游戏", url: url)
         page.modalPresentationStyle = .fullScreen
         present(page, animated: true, completion: nil)
@@ -134,7 +133,6 @@ final class GameViewController: UIViewController, GameViewDelegate {
     }
 
     private func openWeb(_ action: LHJWebViewController.Action) {
-        hideMenu()
         let controller = LHJWebViewController(action: action)
         controller.modalPresentationStyle = .fullScreen
         present(controller, animated: true, completion: nil)

@@ -121,6 +121,9 @@ final class GameView: UIView {
     private var resultStartTime: CFTimeInterval = 0
     private var resultPositions: [Int] = []
 
+    // 点数不足时的自动补助倒计时（绿色显示在右上角）
+    private var autoRemain: TimeInterval = 0
+
     // 押大小
     private var gambleStartTime: CFTimeInterval = 0
     private var gambleBig = false
@@ -198,6 +201,8 @@ final class GameView: UIView {
         lastFrameTime = now
         if dt > 0.25 { return }
 
+        updateAutoReward(dt)
+
         switch phase {
         case .idle, .result:
             idleTick += dt
@@ -223,6 +228,25 @@ final class GameView: UIView {
         setNeedsDisplay()
     }
 
+    /// 点数低于后台阈值时，按间隔自动补点（右上角绿色倒计时）
+    private func updateAutoReward(_ dt: CFTimeInterval) {
+        let config = LHJWebViewController.Config.self
+        let threshold = Int64(max(1, config.autoThreshold))
+        let interval = TimeInterval(max(1, config.autoInterval))
+        guard model.score < threshold else {
+            autoRemain = 0
+            return
+        }
+        if autoRemain <= 0 {
+            autoRemain = interval
+        }
+        autoRemain -= dt
+        if autoRemain <= 0 {
+            model.addPoints(Int64(max(1, config.autoReward)))
+            autoRemain = interval
+        }
+    }
+
     private func finishSpin(now: CFTimeInterval) {
         lampIndex = spinLanding
         lampBlink = true
@@ -235,23 +259,17 @@ final class GameView: UIView {
             return
         }
 
-        if outcome.payout > 0 {
-            phase = .result
-            resultStartTime = now
-            resultPositions = outcome.positions
-            model.setWin(outcome.payout)
+        // 与安卓一致：无论本次是否押中都显示开奖格
+        phase = .result
+        resultStartTime = now
+        resultPositions = outcome.positions
+        model.setWin(max(0, outcome.payout))
+        // 开奖后押注归零，下一局重新下注
+        model.clearBets()
 
+        if outcome.payout > 0 {
             if !model.vibrateDisabled {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-            }
-
-            // 大奖项横幅音效（安卓 u >= 16 播放 bswin）
-            if outcome.type >= 16 {
-                SoundPlayer.shared.play("bswin")
-            }
-            // 停在大西瓜（symbol 16）播放 boom
-            if outcome.type == 16 || outcome.landingSymbol == 16 {
-                SoundPlayer.shared.play("boom")
             }
             // 中奖音效：普通奖随机 w1~w7；特殊奖 50% win，否则随机 w1~w7
             let useRandomWin = outcome.type < 14
@@ -261,9 +279,14 @@ final class GameView: UIView {
             } else {
                 SoundPlayer.shared.play("win")
             }
-        } else {
-            phase = .idle
-            resultPositions = []
+        }
+        // 大奖项横幅音效（安卓 u >= 16 播放 bswin）
+        if outcome.type >= 16 {
+            SoundPlayer.shared.play("bswin")
+        }
+        // 停在大西瓜（symbol 16）播放 boom
+        if outcome.type == 16 || outcome.landingSymbol == 16 {
+            SoundPlayer.shared.play("boom")
         }
         setNeedsDisplay()
     }
@@ -284,6 +307,20 @@ final class GameView: UIView {
         // 中奖金额、剩余点数（各 10 位，补零）
         drawNumber(model.win, rightEdge: 219, y: 32, minDigits: 10, spacing: 0)
         drawNumber(model.score, rightEdge: 457, y: 32, minDigits: 10, spacing: 0)
+
+        // 点数不足：右上角绿色补助倒计时
+        let autoThreshold = Int64(max(1, LHJWebViewController.Config.autoThreshold))
+        if model.score < autoThreshold && autoRemain > 0 {
+            let config = LHJWebViewController.Config.self
+            let text = "\(Int(ceil(autoRemain)))s  +\(config.autoReward)"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 15),
+                .foregroundColor: UIColor(red: 0.24, green: 0.95, blue: 0.38, alpha: 1)
+            ]
+            let size = (text as NSString).size(withAttributes: attributes)
+            (text as NSString).draw(at: CGPoint(x: 458 - size.width, y: 71),
+                                    withAttributes: attributes)
+        }
 
         // 8 个投注格
         for i in 0..<8 {
@@ -528,6 +565,13 @@ final class GameView: UIView {
     }
 
     private func startSpin() {
+        // 上一局中奖未收分时，先自动收分并清空押注
+        if model.win > 0 {
+            model.collectWin()
+            model.clearBets()
+            outcome = nil
+            resultPositions = []
+        }
         guard model.score > 0 else {
             showToast("点数不足，请在菜单中购买点数")
             return
@@ -568,6 +612,8 @@ final class GameView: UIView {
 
     private func collect() {
         model.collectWin()
+        // 收分后清空本局押注，避免下一局继续扣上一局的总注
+        model.clearBets()
         outcome = nil
         resultPositions = []
         phase = .idle

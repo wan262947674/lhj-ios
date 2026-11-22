@@ -40,6 +40,7 @@ xcrun --sdk iphoneos swiftc \
     -framework AVFoundation \
     -framework QuartzCore \
     -framework WebKit \
+    -framework CryptoKit \
     "$GAME"/Sources/main.swift \
     "$GAME"/Sources/AppDelegate.swift \
     "$GAME"/Sources/GameModel.swift \

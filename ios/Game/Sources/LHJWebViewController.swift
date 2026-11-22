@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import CryptoKit
 
 /// 排行榜 / 成就 / 观看广告 / 积分兑换 / 购买卡密 的通用联网页（对接 8080 后台）
 final class LHJWebViewController: UIViewController, UITextFieldDelegate {
@@ -38,6 +39,29 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
 
     /// 后台地址（Base64，界面不展示）
     private static let serverBase64 = "aHR0cDovLzEuMTE3LjIwNC4xMzc6ODA4MA=="
+
+    /// 请求/回包签名密钥（与安卓 LhjSign 一致）
+    static let signSecret = "LHJ@2026#sign"
+
+    static func md5(_ text: String) -> String {
+        let digest = Insecure.MD5.hash(data: Data(text.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 补全 http 协议，避免 WKWebView 白屏（后台地址可能填成 www.xxx.com）
+    static func normalizedURL(_ raw: String) -> URL? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let lower = text.lowercased()
+        if !lower.hasPrefix("http://") && !lower.hasPrefix("https://") {
+            text = "http://" + text
+        }
+        if let url = URL(string: text) { return url }
+        if let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) {
+            return URL(string: encoded)
+        }
+        return nil
+    }
 
     private let action: Action
     private let titleLabel = UILabel()
@@ -246,8 +270,12 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     // MARK: - 网络
 
     private func requestURL(_ name: String) -> URL? {
-        guard let base = baseURLString else { return nil }
-        var components = URLComponents(string: base + "/LHJ/" + name)
+        guard let base = baseURLString, let baseURL = URL(string: base) else { return nil }
+        var components = URLComponents()
+        components.scheme = baseURL.scheme
+        components.host = baseURL.host
+        components.port = baseURL.port
+        components.path = "/LHJ/" + name
         var items = [
             URLQueryItem(name: "device", value: deviceID),
             URLQueryItem(name: "hold", value: "\(GameModel.shared.score)"),
@@ -256,8 +284,13 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         if name == "exchange" {
             items.append(URLQueryItem(name: "points", value: inputField.text ?? ""))
         }
-        components?.queryItems = items
-        return components?.url
+        // 与安卓 LhjSign 一致：先拼 ts，再对整个 URL 做 MD5 签名
+        items.append(URLQueryItem(name: "ts", value: "\(Int(Date().timeIntervalSince1970))"))
+        components.queryItems = items
+        guard let unsigned = components.url else { return nil }
+        let raw = unsigned.absoluteString
+        let sign = LHJWebViewController.md5(raw + "|" + LHJWebViewController.signSecret)
+        return URL(string: raw + "&sign=" + sign)
     }
 
     private func send(_ name: String, mode: Mode) {
@@ -269,7 +302,9 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            let headerSign = (response as? HTTPURLResponse)?
+                .value(forHTTPHeaderField: "X-LHJ-Sign")
             let text: String
             if let data = data, let body = String(data: data, encoding: .utf8) {
                 text = body
@@ -277,7 +312,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                 text = "ERR|NET|网络异常，请检查网络后重试"
             }
             DispatchQueue.main.async {
-                self?.handle(text, mode: mode)
+                self?.handle(text, mode: mode, sign: headerSign)
             }
         }.resume()
     }
@@ -304,7 +339,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         }
 
         if self.action == .buy {
-            if let url = URL(string: Config.buyURL), !Config.buyURL.isEmpty {
+            if let url = LHJWebViewController.normalizedURL(Config.buyURL) {
                 let page = LHJWebPageController(title: "购买卡密", url: url)
                 page.modalPresentationStyle = .fullScreen
                 self.present(page, animated: true, completion: nil)
@@ -316,7 +351,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         contentView.text = "观看广告可获得 \(Config.adReward) 点游戏点数\n\n点击“观看广告”进入广告页，看完返回后点“领取奖励”。"
     }
 
-    private func handle(_ response: String, mode: Mode) {
+    private func handle(_ response: String, mode: Mode, sign: String?) {
         actionButton.isEnabled = true
         let text = response.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.hasPrefix("OK|") else {
@@ -331,10 +366,27 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             contentView.text = body
         case .points:
             let parts = body.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-            if let first = parts.first, let points = Int64(first) {
+            let points = Int64(parts.first ?? "") ?? 0
+            // 校验回包签名，防止被改包加点（与安卓 LhjVerify 一致）
+            let header = (sign ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !header.isEmpty else {
+                contentView.text = "数据校验失败，已拒绝加点"
+                return
+            }
+            let expect = LHJWebViewController.md5(
+                "POINTS|\(points)|" + LHJWebViewController.signSecret)
+            guard header == expect else {
+                contentView.text = "数据校验失败，已拒绝加点"
+                return
+            }
+            if points > 0 {
                 GameModel.shared.addPoints(points)
             }
-            contentView.text = parts.count > 1 ? String(parts[1]) : body
+            var message = parts.count > 1 ? String(parts[1]) : body
+            if let range = message.range(of: "|", options: .backwards) {
+                message = String(message[..<range.lowerBound])
+            }
+            contentView.text = message
         }
     }
 
@@ -435,7 +487,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     }
 
     @objc private func watchTapped() {
-        guard let url = URL(string: Config.adURL), !Config.adURL.isEmpty else {
+        guard let url = LHJWebViewController.normalizedURL(Config.adURL) else {
             contentView.text = "广告地址暂未配置，请联系客服QQ：4711851"
             return
         }
@@ -553,9 +605,24 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         indicator.stopAnimating()
+        showLoadError(error)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         indicator.stopAnimating()
+        showLoadError(error)
+    }
+
+    private func showLoadError(_ error: Error) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        let html = """
+        <html><meta name="viewport" content="width=device-width,initial-scale=1">
+        <body style="background:#111;color:#eee;font-family:-apple-system;padding:24px">
+        <h3 style="color:#f5c451">网页打开失败</h3>
+        <p>\(pageURL.absoluteString)</p>
+        <p style="color:#999">\(error.localizedDescription)</p>
+        </body></html>
+        """
+        webView.loadHTMLString(html, baseURL: nil)
     }
 }
