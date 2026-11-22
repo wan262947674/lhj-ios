@@ -25,6 +25,10 @@ final class GameModel {
     private(set) var win: Int64 = 0
     private(set) var topScore: Int64 = 0
     private(set) var bets = [Int](repeating: 0, count: 8)
+    /// 上一局已提交的押注方案（对应安卓 Q，用于“点开始复押上一局”）
+    private(set) var lastBets = [Int](repeating: 0, count: 8)
+    /// 本局是否已下过注（对应安卓 ay；开奖后复位，首次下注时先清空旧注）
+    private(set) var betPlaced = false
     private var pool: Int64 = 0
 
     var soundDisabled: Bool {
@@ -71,6 +75,11 @@ final class GameModel {
         guard group >= 0, group < bets.count else { return false }
         guard bets[group] < 99 else { return false }
         guard score >= 1 else { return false }
+        // 本局第一次下注前，清空上一局遗留的押注（安卓 d(I)）
+        if !betPlaced {
+            betPlaced = true
+            bets = [Int](repeating: 0, count: bets.count)
+        }
         score -= 1
         bets[group] += 1
         save()
@@ -104,10 +113,34 @@ final class GameModel {
         save()
     }
 
-    /// 开始游戏时扣除本轮总注
-    func spend(_ value: Int64) {
-        guard value > 0 else { return }
-        score = max(0, score - value)
+    enum StartCheck {
+        case ok
+        case noScore       // 余额为 0
+        case noBet         // 上一局没有押注
+        case insufficient  // 余额不足
+    }
+
+    /// 点击开始时的校验/复押逻辑（对应安卓 onTouch 中 ay==false 的复押分支）
+    func tryStart() -> StartCheck {
+        if betPlaced {
+            // 本局已下注，点数在下注时已扣
+            return .ok
+        }
+        // 复押上一局方案
+        let total = lastBets.reduce(0, +)
+        if score == 0 { return .noScore }
+        if total <= 0 { return .noBet }
+        if score < Int64(total) { return .insufficient }
+        bets = lastBets
+        score -= Int64(total)
+        save()
+        return .ok
+    }
+
+    /// 开奖前提交本局押注（对应安卓 r()：保存上一局方案并复位 ay）
+    func commitSpin() {
+        lastBets = bets
+        betPlaced = false
         save()
     }
 

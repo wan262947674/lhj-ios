@@ -129,6 +129,14 @@ final class GameView: UIView {
     private var gambleBig = false
     private var gambleText: String = ""
 
+    // 帧计数：用于红灯交替 / 闪烁节奏
+    private var frameCount: Int = 0
+
+    // 长按快速押注
+    private var pressedGroup: Int?
+    private var rapidTimer: Timer?
+    private var rapidActive = false
+
     private let toastLabel = UILabel()
 
     // MARK: - 初始化
@@ -201,6 +209,7 @@ final class GameView: UIView {
         lastFrameTime = now
         if dt > 0.25 { return }
 
+        frameCount += 1
         updateAutoReward(dt)
 
         switch phase {
@@ -218,7 +227,13 @@ final class GameView: UIView {
             }
         case .spinning:
             let progress = min(1, (now - spinStartTime) / spinDuration)
-            let eased = 1 - pow(1 - progress, 3)
+            // 慢-快-慢（ease-in-out），与安卓跑灯节奏一致
+            let eased: Double
+            if progress < 0.5 {
+                eased = 2 * progress * progress
+            } else {
+                eased = 1 - pow(-2 * progress + 2, 2) / 2
+            }
             let step = Int(Double(spinSteps) * eased)
             lampIndex = (spinStartIndex + step) % 24
             if progress >= 1 {
@@ -264,8 +279,6 @@ final class GameView: UIView {
         resultStartTime = now
         resultPositions = outcome.positions
         model.setWin(max(0, outcome.payout))
-        // 开奖后押注归零，下一局重新下注
-        model.clearBets()
 
         if outcome.payout > 0 {
             if !model.vibrateDisabled {
@@ -311,8 +324,7 @@ final class GameView: UIView {
         // 点数不足：右上角绿色补助倒计时
         let autoThreshold = Int64(max(1, LHJWebViewController.Config.autoThreshold))
         if model.score < autoThreshold && autoRemain > 0 {
-            let config = LHJWebViewController.Config.self
-            let text = "\(Int(ceil(autoRemain)))s  +\(config.autoReward)"
+            let text = "\(Int(ceil(autoRemain)))s"
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: UIFont.boldSystemFont(ofSize: 15),
                 .foregroundColor: UIColor(red: 0.24, green: 0.95, blue: 0.38, alpha: 1)
@@ -322,8 +334,9 @@ final class GameView: UIView {
                                     withAttributes: attributes)
         }
 
-        // 8 个投注格
+        // 8 个投注格（中奖后随红灯同时闪烁）
         for i in 0..<8 {
+            if phase == .result, !lampBlink { continue }
             drawNumber(Int64(model.bets[i]),
                        rightEdge: GameView.chipX[7 - i],
                        y: 621, minDigits: 2, spacing: 1)
@@ -332,10 +345,13 @@ final class GameView: UIView {
         // 总注
         drawNumber(Int64(model.totalBet), rightEdge: 257, y: 383, minDigits: 2, spacing: 2)
 
-        // 跑灯
-        if lampBlink, lampIndex >= 0, lampIndex < GameView.lamps.count {
-            let p = GameView.lamps[lampIndex]
-            lampImage?.draw(in: CGRect(x: p.x, y: p.y, width: 24, height: 24))
+        // 跑灯 / 红灯（含押大小交替、中奖快闪）
+        drawLamps()
+
+        // 旋转中：移动格叠加遮罩（安卓 e(Canvas) 的格子遮挡素材）
+        if phase == .spinning, lampIndex >= 0, lampIndex < GameView.tiles.count {
+            let p = GameView.tiles[lampIndex]
+            maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
         }
 
         // 中奖高亮 + 大奖项横幅
@@ -355,6 +371,34 @@ final class GameView: UIView {
         }
 
         ctx.restoreGState()
+    }
+
+    /// 跑灯 / 红灯（对应安卓 a(Canvas) 各阶段绘制）
+    private func drawLamps() {
+        guard let lamp = lampImage else { return }
+        func draw(_ i: Int) {
+            let p = GameView.lamps[i]
+            lamp.draw(in: CGRect(x: p.x, y: p.y, width: 24, height: 24))
+        }
+        switch phase {
+        case .gamble:
+            // 左右竖排红灯交替显示（每 4 帧换一侧）
+            let side = (frameCount / 4) % 2
+            for i in 0..<GameView.lamps.count where i % 2 == side {
+                draw(i)
+            }
+        case .result:
+            // 中奖：两个竖排红灯一起快速闪烁
+            if frameCount % 2 == 0 {
+                for i in 0..<GameView.lamps.count { draw(i) }
+            }
+        case .spinning:
+            // 跑灯跟随移动格
+            if lampIndex >= 0, lampIndex < GameView.lamps.count { draw(lampIndex) }
+        default:
+            // 空闲 / 收分：单灯闪烁
+            if lampBlink, lampIndex >= 0, lampIndex < GameView.lamps.count { draw(lampIndex) }
+        }
     }
 
     private func drawBanner(now: CFTimeInterval) {
@@ -426,13 +470,79 @@ final class GameView: UIView {
 
     // MARK: - 触摸
 
+    /// 计算某个设计坐标点对应的下注组（盘面格或底部筹码区），未命中返回 nil
+    private func betGroup(at point: CGPoint) -> Int? {
+        if phase == .spinning || phase == .gamble || model.win > 0 { return nil }
+        for index in 0..<GameView.tiles.count {
+            let origin = GameView.tiles[index]
+            if CGRect(x: origin.x, y: origin.y, width: 60, height: 57).contains(point) {
+                return GameModel.group(for: GameModel.symbols[index])
+            }
+        }
+        if point.y > 560, point.y < 660 {
+            var index = GameView.chipHitX.count - 1
+            while index >= 0 && point.x < GameView.chipHitX[index] {
+                index -= 1
+            }
+            return 7 - index
+        }
+        return nil
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        let raw = touch.location(in: self)
+        let point = CGPoint(x: (raw.x - offset.x) / scaleX,
+                            y: (raw.y - offset.y) / scaleY)
+        guard let group = betGroup(at: point) else { return }
+        pressedGroup = group
+        rapidActive = false
+        rapidTimer?.invalidate()
+        let delayTimer = Timer(timeInterval: 0.4, repeats: false) { [weak self] _ in
+            self?.scheduleRapidBet()
+        }
+        rapidTimer = delayTimer
+        RunLoop.main.add(delayTimer, forMode: .common)
+    }
+
+    /// 长按延时结束后开始连续快速押注
+    private func scheduleRapidBet() {
+        guard let g = pressedGroup else { return }
+        rapidActive = true
+        rapidTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.13, repeats: true) { [weak self] _ in
+            self?.placeBet(group: g)
+        }
+        rapidTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        placeBet(group: g)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        rapidTimer?.invalidate()
+        rapidTimer = nil
+        pressedGroup = nil
+        rapidActive = false
+    }
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let raw = touch.location(in: self)
         let point = CGPoint(x: (raw.x - offset.x) / scaleX,
                             y: (raw.y - offset.y) / scaleY)
 
+        rapidTimer?.invalidate()
+        rapidTimer = nil
+        pressedGroup = nil
+        let wasRapid = rapidActive
+        rapidActive = false
+
         if phase == .spinning || phase == .gamble {
+            return
+        }
+
+        // 长按快速押注期间释放手指，不再触发单次押注
+        if wasRapid {
             return
         }
 
@@ -565,27 +675,20 @@ final class GameView: UIView {
     }
 
     private func startSpin() {
-        // 上一局中奖未收分时，先自动收分并清空押注
-        if model.win > 0 {
-            model.collectWin()
+        switch model.tryStart() {
+        case .noScore, .insufficient:
             model.clearBets()
-            outcome = nil
-            resultPositions = []
-        }
-        guard model.score > 0 else {
             showToast("点数不足，请在菜单中购买点数")
             return
-        }
-        guard model.totalBet > 0 else {
+        case .noBet:
+            model.clearBets()
             showToast("请先在盘面下注")
             return
+        case .ok:
+            break
         }
-        guard model.score >= Int64(model.totalBet) else {
-            showToast("点数不足，请在菜单中购买点数")
-            return
-        }
-        model.spend(Int64(model.totalBet))
 
+        model.commitSpin()
         outcome = model.spin()
         guard let result = outcome else { return }
 
@@ -612,8 +715,6 @@ final class GameView: UIView {
 
     private func collect() {
         model.collectWin()
-        // 收分后清空本局押注，避免下一局继续扣上一局的总注
-        model.clearBets()
         outcome = nil
         resultPositions = []
         phase = .idle
