@@ -59,6 +59,9 @@ final class GameView: UIView {
         CGPoint(x: 72, y: 240), CGPoint(x: 72, y: 174)
     ]
 
+    // 中间红色小灯（对应安卓 h(Canvas) 的 ah/ai = 228,306）
+    private static let centerLamp = CGPoint(x: 228, y: 306)
+
     // 8 个投注格数字显示位置（右对齐边）
     private static let chipX: [CGFloat] = [59, 116, 173, 230, 287, 344, 401, 458]
     // 投注格点击分界
@@ -231,8 +234,8 @@ final class GameView: UIView {
         case .gamble:
             let elapsed = now - gambleStartTime
             gambleText = (Int(elapsed * 12) % 2 == 0) ? "大" : "小"
-            // 押大小：左右竖排红灯交替，先快后慢
-            let total = 1.9
+            // 押大小：左右竖排红灯交替，先快后慢（安卓 ae[15]=3500ms）
+            let total = 3.5
             let progress = min(1, elapsed / total)
             let interval = 0.05 + 0.36 * pow(progress, 2.4)
             gambleLampTimer += dt
@@ -351,9 +354,11 @@ final class GameView: UIView {
                                     withAttributes: attributes)
         }
 
-        // 8 个投注格（中奖后随整圈红灯同步闪烁）
+        // 8 个投注格（中奖后仅中奖那格数字闪烁，其余不闪）
+        let winningGroup: Int? = (phase == .result && spinLanding >= 0 && spinLanding < GameModel.symbols.count)
+            ? GameModel.group(for: GameModel.symbols[spinLanding]) : nil
         for i in 0..<8 {
-            if phase == .result, !lampOn { continue }
+            if phase == .result, i == winningGroup, !lampOn { continue }
             drawNumber(Int64(model.bets[i]),
                        rightEdge: GameView.chipX[7 - i],
                        y: 621, minDigits: 2, spacing: 1)
@@ -371,16 +376,13 @@ final class GameView: UIView {
             maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
         }
 
-        // 中奖高亮 + 大奖项横幅
-        if phase == .result || phase == .gamble {
-            for index in resultPositions {
-                guard index >= 0, index < GameView.tiles.count else { continue }
-                let p = GameView.tiles[index]
+        // 中奖高亮（仅原始停下的那一格覆盖遮罩）+ 大奖项横幅
+        if phase == .result {
+            if spinLanding >= 0, spinLanding < GameView.tiles.count {
+                let p = GameView.tiles[spinLanding]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
-            if phase == .result {
-                drawBanner(now: CACurrentMediaTime())
-            }
+            drawBanner(now: CACurrentMediaTime())
         }
 
         if phase == .gamble {
@@ -408,9 +410,10 @@ final class GameView: UIView {
             // 押大小：左右竖排红灯交替亮，不点亮上下排
             for i in (gambleSide == 0 ? leftBand : rightBand) { draw(i) }
         case .result:
-            // 中奖：整圈红灯一起闪烁
+            // 中奖：仅中间红灯 + 中奖停下的那格红灯一起闪烁（不是一圈）
             if lampOn {
-                for i in 0..<GameView.lamps.count { draw(i) }
+                lamp.draw(in: CGRect(x: GameView.centerLamp.x, y: GameView.centerLamp.y, width: 24, height: 24))
+                draw(spinLanding)
             }
         case .spinning:
             // 跑灯：只亮当前移动格对应的那颗灯
@@ -655,6 +658,8 @@ final class GameView: UIView {
         phase = .gamble
         gambleSide = 0
         gambleLampTimer = 0
+        // 立即停止中奖音乐（安卓 j() 播放前先 z() 停掉上一段）
+        SoundPlayer.shared.stopAll()
         // 安卓押大小固定播放 bs
         SoundPlayer.shared.play("bs")
         setNeedsDisplay()
@@ -728,10 +733,12 @@ final class GameView: UIView {
         let delta = (result.landing - lampIndex + 24) % 24
         while steps % 24 != delta { steps += 1 }
         spinSteps = steps
-        spinDuration = 2.8
+        spinDuration = 5.4
         phase = .spinning
         lampBlink = true
 
+        // 立即停止上一段中奖音乐（安卓 j() 播放前先 z() 停掉上一段）
+        SoundPlayer.shared.stopAll()
         // 开火车（type 22 中大奖）播放 train，其余播放 go（安卓 r() 固定单次播放）
         if result.type == 22 {
             SoundPlayer.shared.play("train")
