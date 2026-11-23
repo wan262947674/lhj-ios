@@ -27,6 +27,9 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         static var moreURL = ""
         static var winRate = 20
         static var dragonRate = 20
+        static var xiaoManGuanRate = 0
+        static var xiaoSanYuanRate = 0
+        static var sixiRate = 0
         /// 龙中 0~11 格各自的权重（后台可调，按比例分配）
         static var dragonWeights = [20, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
 
@@ -363,6 +366,20 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         if fields.count >= 13 {
             Config.setDragonWeights(fields[12])
         }
+        if fields.count >= 16 {
+            if let value = Int(fields[13]) {
+                Config.xiaoManGuanRate = value
+                GameModel.xiaoManGuanRate = value
+            }
+            if let value = Int(fields[14]) {
+                Config.xiaoSanYuanRate = value
+                GameModel.xiaoSanYuanRate = value
+            }
+            if let value = Int(fields[15]) {
+                Config.sixiRate = value
+                GameModel.sixiRate = value
+            }
+        }
 
         if self.action == .buy {
             if let url = LHJWebViewController.normalizedURL(Config.buyURL) {
@@ -462,6 +479,20 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                 }
                 if fields.count >= 13 {
                     Config.setDragonWeights(fields[12])
+                }
+                if fields.count >= 16 {
+                    if let value = Int(fields[13]) {
+                        Config.xiaoManGuanRate = value
+                        GameModel.xiaoManGuanRate = value
+                    }
+                    if let value = Int(fields[14]) {
+                        Config.xiaoSanYuanRate = value
+                        GameModel.xiaoSanYuanRate = value
+                    }
+                    if let value = Int(fields[15]) {
+                        Config.sixiRate = value
+                        GameModel.sixiRate = value
+                    }
                 }
             }
         }.resume()

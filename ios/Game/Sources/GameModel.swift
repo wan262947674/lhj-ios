@@ -22,6 +22,10 @@ final class GameModel {
     static var dragonRate = 20
     // 龙中 0~11 格的权重（后台可调）
     static var dragonWeights = [20, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
+    // 小满贯 / 小三元 / 小四喜 强制触发概率（后台可调，默认 0 保持原版）
+    static var xiaoManGuanRate = 0
+    static var xiaoSanYuanRate = 0
+    static var sixiRate = 0
 
     private let defaults = UserDefaults.standard
 
@@ -261,6 +265,12 @@ final class GameModel {
                 type = 17   // 大三元
             } else if Int.random(in: 0..<100) < GameModel.winRate, outs[22] > 0, w22 > 3 {
                 type = 22   // 开火车
+            } else if Int.random(in: 0..<100) < GameModel.xiaoManGuanRate, outs[21] > 0 {
+                type = 21   // 小满贯
+            } else if Int.random(in: 0..<100) < GameModel.xiaoSanYuanRate, outs[18] > 0 {
+                type = 18   // 小三元
+            } else if Int.random(in: 0..<100) < GameModel.sixiRate, outs[19] > 0 {
+                type = 19   // 小四喜
             }
         }
 
