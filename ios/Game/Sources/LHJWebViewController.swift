@@ -74,6 +74,10 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     private let signButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
     private var adWatched = false
+    private var adOpenedAt: Date?
+
+    /// 广告观看最短时长（秒），与安卓 MoreActivity 的 adGate 一致
+    static let adGateSeconds = 15
 
     init(action: Action) {
         self.action = action
@@ -501,7 +505,8 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             return
         }
         // 与安卓一致：在应用内 WebView 打开广告页，返回后领取奖励
-        let page = LHJWebPageController(title: "免费获取积分", url: url)
+        let page = LHJWebPageController(title: "免费获取积分", url: url,
+                                        gateSeconds: LHJWebViewController.adGateSeconds)
         page.modalPresentationStyle = .fullScreen
         page.onClose = { [weak self] in
             self?.adWatched = true
@@ -509,6 +514,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             self?.contentView.text = "广告已看完，请点击“领取奖励”。"
         }
         present(page, animated: true, completion: nil)
+        adOpenedAt = Date()
         adWatched = true
         claimButton.isEnabled = true
         contentView.text = "广告已打开，看完后返回点击“领取奖励”。"
@@ -527,7 +533,25 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     }
 
     @objc private func closeTapped() {
+        // 广告页倒计时未结束禁止返回
+        if action == .ad, let opened = adOpenedAt {
+            let remaining = LHJWebViewController.adGateSeconds - Int(Date().timeIntervalSince(opened))
+            if remaining > 0 {
+                showAdGateAlert(remaining: remaining)
+                return
+            }
+        }
         dismiss(animated: true, completion: nil)
+    }
+
+    private func showAdGateAlert(remaining: Int) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(
+            title: "广告还未看完",
+            message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(remaining) 秒",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "确定", style: .default))
+        present(alert, animated: true, completion: nil)
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -543,14 +567,17 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
 
     private let pageTitle: String
     private let pageURL: URL
+    private let gateSeconds: Int
+    private let openedAt = Date()
     private let webView = WKWebView(frame: .zero)
     private let titleLabel = UILabel()
     private let closeButton = UIButton(type: .system)
     private let indicator = UIActivityIndicatorView(style: .large)
 
-    init(title: String, url: URL) {
+    init(title: String, url: URL, gateSeconds: Int = 0) {
         self.pageTitle = title
         self.pageURL = url
+        self.gateSeconds = gateSeconds
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -603,7 +630,26 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
         indicator.center = webView.center
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // 广告页倒计时结束前禁止任何方式关闭
+        isModalInPresentation = gateSeconds > 0
+    }
+
     @objc private func closeTapped() {
+        if gateSeconds > 0 {
+            let remaining = gateSeconds - Int(Date().timeIntervalSince(openedAt))
+            if remaining > 0 {
+                guard presentedViewController == nil else { return }
+                let alert = UIAlertController(
+                    title: "广告还未看完",
+                    message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(remaining) 秒",
+                    preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "确定", style: .default))
+                present(alert, animated: true, completion: nil)
+                return
+            }
+        }
         onClose?()
         dismiss(animated: true, completion: nil)
     }
