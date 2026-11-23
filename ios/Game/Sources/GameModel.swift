@@ -18,6 +18,8 @@ final class GameModel {
     static let poolRatio: [Int] = [25, 100, 1000, 10000, 22000]
     // 特殊奖触发概率（LhjConfig.winRate，后台可调，默认 20）
     static var winRate = 20
+    // 龙大奖(16)触发概率（后台可调，默认 20）
+    static var dragonRate = 20
 
     private let defaults = UserDefaults.standard
 
@@ -166,7 +168,16 @@ final class GameModel {
         return [p]
     }
 
-    func spin() -> Outcome {
+    /// 从当前灯位置顺时针找下一条龙（symbol 16），与安卓 r() 一致
+    static func nextDragon(after start: Int) -> Int {
+        for offset in 1...24 {
+            let idx = (start + offset) % 24
+            if GameModel.symbols[idx] == 16 { return idx }
+        }
+        return 9
+    }
+
+    func spin(currentLamp: Int = 0) -> Outcome {
         let total = totalBet
         let totalKind = betKinds
 
@@ -226,19 +237,17 @@ final class GameModel {
         }
         outs[22] = sum22
 
-        // 3. 特殊情况优先（与 GameBody.cal 一致：大三元奖池可负担且超过总注 10 倍）
+        // 3. 特殊大奖优先（按后台 winRate / dragonRate 触发；放宽安卓原版卡死大奖的返奖池/10倍条件，让几率真正生效）
         var type = -1
         if total > 0 {
-            let bigRatio = outs[20] / total
-            if Int.random(in: 0..<100) < GameModel.winRate,
-               outs[20] <= target, bigRatio > 10, totalKind >= 4 {
-                type = 20
-            } else if Int.random(in: 0..<100) < GameModel.winRate,
-                      outs[17] <= target, bigRatio > 10, totalKind >= 2 {
-                type = 17
-            } else if Int.random(in: 0..<100) < GameModel.winRate,
-                      outs[22] <= target, bigRatio > 10, w22 > 3 {
-                type = 22
+            if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 4, outs[20] > 0 {
+                type = 20   // 大满贯
+            } else if Int.random(in: 0..<100) < GameModel.dragonRate, outs[16] > 0 {
+                type = 16   // 龙
+            } else if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 2, outs[17] > 0 {
+                type = 17   // 大三元
+            } else if Int.random(in: 0..<100) < GameModel.winRate, outs[22] > 0, w22 > 3 {
+                type = 22   // 开火车
             }
         }
 
@@ -288,7 +297,16 @@ final class GameModel {
             payout += Int64(betAmount(for: GameModel.symbols[p]))
         }
 
-        let landing = positions.first ?? Int.random(in: 0..<24)
+        // 跑灯落点：龙/大三元/小三元/小四喜/大满贯/小满贯都落到下一条龙（二次触发），开火车落到火车起点
+        let landing: Int
+        switch type {
+        case 16...21:
+            landing = GameModel.nextDragon(after: currentLamp)
+        case 22:
+            landing = v22
+        default:
+            landing = positions.first ?? Int.random(in: 0..<24)
+        }
 
         return Outcome(type: type, positions: positions, payout: payout,
                        landing: landing, landingSymbol: GameModel.symbols[landing])

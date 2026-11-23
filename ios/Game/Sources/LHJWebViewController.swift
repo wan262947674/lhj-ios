@@ -26,6 +26,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         static var helpText = ""
         static var moreURL = ""
         static var winRate = 20
+        static var dragonRate = 20
     }
 
     /// 玩家当前积分（后台 points）
@@ -336,6 +337,10 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         if fields.count >= 11, let rate = Int(fields[10]) {
             Config.winRate = rate
             GameModel.winRate = rate
+        }
+        if fields.count >= 12, let rate = Int(fields[11]) {
+            Config.dragonRate = rate
+            GameModel.dragonRate = rate
         }
 
         if self.action == .buy {
