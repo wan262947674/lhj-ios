@@ -483,8 +483,8 @@ final class GameView: UIView {
                 let p = GameView.tiles[lampIndex]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
-            // 横幅：落龙停留 / 开格停留 / 全部揭示完才显示（闪烁阶段隐藏，与安卓 aA=5/6 一致）
-            if !revealing || revealStage == .landing || revealStage == .open {
+            // 大奖项横幅：等中奖格全部揭示完才弹（和开火车开奖节奏一致）
+            if !revealing {
                 drawBanner(now: CACurrentMediaTime())
             }
         }
