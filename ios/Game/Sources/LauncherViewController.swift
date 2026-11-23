@@ -14,11 +14,7 @@ final class LauncherViewController: UIViewController {
     private let loadingLabel = UILabel()
 
     private var launchTime: CFTimeInterval = 0
-    private var minDelayPassed = false
-    private var serverResult: Bool?
-    private var revealed = false
     private var started = false
-    private var failAlert: UIAlertController?
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
@@ -43,13 +39,13 @@ final class LauncherViewController: UIViewController {
         // 与安卓一致：进入启动页即拉取运营配置
         LHJWebViewController.fetchConfig()
 
-        // 1.7 秒后开始显示“开始游戏”（安卓 Thread.sleep 0x6a4）
+        // 1.7 秒后隐藏加载框并显示“开始游戏”（安卓 LauncherActivity 不校验网络）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) { [weak self] in
-            self?.minDelayPassed = true
-            self?.revealWhenReady()
+            guard let self = self, !self.started else { return }
+            self.spinner.stopAnimating()
+            self.loadingBox.isHidden = true
+            self.startButton.isHidden = false
         }
-
-        checkServer()
     }
 
     // MARK: - UI
@@ -116,48 +112,6 @@ final class LauncherViewController: UIViewController {
             loadingLabel.trailingAnchor.constraint(lessThanOrEqualTo: loadingBox.trailingAnchor, constant: -12),
             loadingLabel.centerYAnchor.constraint(equalTo: loadingBox.centerYAnchor),
         ])
-    }
-
-    // MARK: - 服务器检测
-
-    private func checkServer() {
-        serverResult = nil
-        LHJWebViewController.checkServer { [weak self] ok in
-            DispatchQueue.main.async {
-                self?.serverResult = ok
-                self?.revealWhenReady()
-            }
-        }
-    }
-
-    private func revealWhenReady() {
-        guard !revealed, minDelayPassed, let ok = serverResult else { return }
-        if ok {
-            revealed = true
-            spinner.stopAnimating()
-            loadingBox.isHidden = true
-            startButton.isHidden = false
-        } else {
-            showServerFail()
-        }
-    }
-
-    private func showServerFail() {
-        guard failAlert == nil else { return }
-        let alert = UIAlertController(
-            title: "无法连接服务器",
-            message: "网络未连接或服务器维护中，请检查网络后重试。",
-            preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
-            guard let self = self else { return }
-            self.failAlert = nil
-            self.checkServer()
-        })
-        alert.addAction(UIAlertAction(title: "退出", style: .cancel) { _ in
-            exit(0)
-        })
-        failAlert = alert
-        present(alert, animated: true, completion: nil)
     }
 
     // MARK: - 开始游戏

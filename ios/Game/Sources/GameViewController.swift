@@ -5,6 +5,8 @@ final class GameViewController: UIViewController, GameViewDelegate {
     private let gameView = GameView(frame: .zero)
     private var menuView: MenuView?
     private var didPlayOpen = false
+    private var gateChecked = false
+    private var gateOverlay: UIView?
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
@@ -28,6 +30,81 @@ final class GameViewController: UIViewController, GameViewDelegate {
             SoundPlayer.shared.play("open")
             LHJWebViewController.fetchInfo()
         }
+        if !gateChecked {
+            gateChecked = true
+            runServerGate()
+        }
+    }
+
+    // MARK: - 联网校验（对齐安卓 LhjNetGate）
+
+    private func runServerGate() {
+        showGateProgress()
+        LHJWebViewController.checkServer { [weak self] ok in
+            guard let self = self else { return }
+            self.hideGateProgress()
+            guard !ok else { return }
+            let alert = UIAlertController(
+                title: "无法连接服务器",
+                message: "网络未连接或服务器维护中，请检查网络后重试。",
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+                self?.runServerGate()
+            })
+            alert.addAction(UIAlertAction(title: "退出", style: .cancel) { _ in
+                exit(0)
+            })
+            self.present(alert, animated: true, completion: nil)
+        }
+    }
+
+    private func showGateProgress() {
+        guard gateOverlay == nil else { return }
+        // 安卓 ProgressDialog：拦截全屏点击 + 居中黑色圆角框
+        let dim = UIView(frame: view.bounds)
+        dim.backgroundColor = UIColor(white: 0, alpha: 0.25)
+        dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let box = UIView()
+        box.backgroundColor = UIColor(white: 0, alpha: 0.75)
+        box.layer.cornerRadius = 6
+        box.translatesAutoresizingMaskIntoConstraints = false
+        dim.addSubview(box)
+
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.startAnimating()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(spinner)
+
+        let label = UILabel()
+        label.text = "正在连接服务器..."
+        label.textColor = .white
+        label.font = UIFont.systemFont(ofSize: 15)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            box.centerXAnchor.constraint(equalTo: dim.centerXAnchor),
+            box.centerYAnchor.constraint(equalTo: dim.centerYAnchor),
+            box.widthAnchor.constraint(equalToConstant: 220),
+            box.heightAnchor.constraint(equalToConstant: 70),
+
+            spinner.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 20),
+            spinner.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+
+            label.leadingAnchor.constraint(equalTo: spinner.trailingAnchor, constant: 12),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+
+        view.addSubview(dim)
+        gateOverlay = dim
+    }
+
+    private func hideGateProgress() {
+        gateOverlay?.removeFromSuperview()
+        gateOverlay = nil
     }
 
     // MARK: - GameViewDelegate
