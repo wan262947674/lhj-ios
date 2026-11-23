@@ -348,7 +348,6 @@ final class GameView: UIView {
         resultStartTime = now
         resultPositions = outcome.positions
         revealedCount = 0
-        model.setWin(max(0, outcome.payout))
 
         // 龙 / 大三元 / 小三元 / 小四喜 / 大满贯 / 小满贯：
         // 安卓落龙后先停留 1.8s（横幅 + 落点格遮罩），再进入「红灯交替 → 开一格 → 停留」循环
@@ -384,6 +383,8 @@ final class GameView: UIView {
     private func finishReveal() {
         resultStartTime = CACurrentMediaTime()
         guard let outcome = outcome else { return }
+        // 总分等全部格揭示完才显示（与安卓一致：最后跟音效一起出现）
+        model.setWin(max(0, outcome.payout))
         // 大奖项每格揭示时已播 zha，这里只处理普通奖
         if revealedCount > 0, outcome.type < 16 {
             SoundPlayer.shared.play("zha")
