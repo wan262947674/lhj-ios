@@ -196,8 +196,8 @@ final class GameModel {
         var outs = [Int](repeating: 0, count: 23)
         for i in 0..<16 { outs[i] = betAmount(for: i) }
 
-        // 16：龙 —— 5~11 个不同格（20% 概率 0 格）
-        var w16 = Int.random(in: 0..<7) + 5
+        // 16：龙 —— 1~11 个不同格（20% 概率 0 格）
+        var w16 = Int.random(in: 0..<11) + 1
         if Int.random(in: 0..<100) < 20 { w16 = 0 }
         var pos16: [Int] = []
         var sum16 = 0
