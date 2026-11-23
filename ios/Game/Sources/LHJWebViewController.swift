@@ -435,6 +435,10 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                     Config.winRate = rate
                     GameModel.winRate = rate
                 }
+                if fields.count >= 12, let rate = Int(fields[11]) {
+                    Config.dragonRate = rate
+                    GameModel.dragonRate = rate
+                }
             }
         }.resume()
     }
