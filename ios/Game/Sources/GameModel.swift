@@ -259,8 +259,8 @@ final class GameModel {
         if total > 0 {
             if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 4, outs[20] > 0 {
                 type = 20   // 大满贯
-            } else if Int.random(in: 0..<100) < GameModel.dragonRate, outs[16] > 0 {
-                type = 16   // 龙
+            } else if Int.random(in: 0..<100) < GameModel.dragonRate {
+                type = 16   // 龙（命中概率即落龙，不再要求随机格子上必须有押注）
             } else if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 2, outs[17] > 0 {
                 type = 17   // 大三元
             } else if Int.random(in: 0..<100) < GameModel.winRate, outs[22] > 0, w22 > 3 {
