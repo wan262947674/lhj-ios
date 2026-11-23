@@ -43,6 +43,7 @@ xcrun --sdk iphoneos swiftc \
     -framework CryptoKit \
     "$GAME"/Sources/main.swift \
     "$GAME"/Sources/AppDelegate.swift \
+    "$GAME"/Sources/LauncherViewController.swift \
     "$GAME"/Sources/GameModel.swift \
     "$GAME"/Sources/SoundPlayer.swift \
     "$GAME"/Sources/GameView.swift \

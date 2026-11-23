@@ -9,7 +9,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         SoundPlayer.shared.prepare()
         let window = UIWindow(frame: UIScreen.main.bounds)
         window.backgroundColor = .black
-        window.rootViewController = GameViewController()
+        window.rootViewController = LauncherViewController()
         window.makeKeyAndVisible()
         self.window = window
         return true

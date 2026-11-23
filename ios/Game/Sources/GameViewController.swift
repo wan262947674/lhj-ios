@@ -4,8 +4,6 @@ final class GameViewController: UIViewController, GameViewDelegate {
 
     private let gameView = GameView(frame: .zero)
     private var menuView: MenuView?
-    private var gateAlert: UIAlertController?
-    private var gateChecked = false
     private var didPlayOpen = false
 
     override var prefersStatusBarHidden: Bool { true }
@@ -29,37 +27,6 @@ final class GameViewController: UIViewController, GameViewDelegate {
             // 安卓启动进入游戏时播放 open
             SoundPlayer.shared.play("open")
             LHJWebViewController.fetchInfo()
-        }
-        if !gateChecked {
-            gateChecked = true
-            checkServerGate()
-        }
-    }
-
-    /// 未连接后台时阻止进入游戏
-    private func checkServerGate() {
-        guard gateAlert == nil else { return }
-        let progress = UIAlertController(title: nil, message: "正在连接服务器...", preferredStyle: .alert)
-        present(progress, animated: true, completion: nil)
-        gateAlert = progress
-
-        LHJWebViewController.checkServer { [weak self] ok in
-            guard let self = self else { return }
-            self.gateAlert?.dismiss(animated: true) {
-                self.gateAlert = nil
-                guard !ok else { return }
-                let fail = UIAlertController(
-                    title: "无法连接服务器",
-                    message: "网络未连接或服务器维护中，请检查网络后重试。",
-                    preferredStyle: .alert)
-                fail.addAction(UIAlertAction(title: "重试", style: .default) { _ in
-                    self.checkServerGate()
-                })
-                fail.addAction(UIAlertAction(title: "退出", style: .cancel) { _ in
-                    exit(0)
-                })
-                self.present(fail, animated: true, completion: nil)
-            }
         }
     }
 
