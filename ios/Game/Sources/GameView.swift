@@ -126,8 +126,18 @@ final class GameView: UIView {
 
     // 逐格揭示（对应安卓 state 7/8：中奖格一格一格跑灯揭示，不是一次全亮）
     private var revealedCount = 0
-    private var revealTimer: CFTimeInterval = 0
     private var revealing = false
+    // 逐格揭示时跑灯顺时针走到目标格
+    private var revealTraveling = false
+    private var revealTarget = 0
+    private var revealTravelTimer: CFTimeInterval = 0
+    private var revealHoldTimer: CFTimeInterval = 0
+    // 龙/大奖项落地后的二次开奖跑灯
+    private var secondSpin = false
+    private var secondSpinStart: CFTimeInterval = 0
+    private var secondSpinFrom = 0
+    private var secondSpinTo = 0
+    private var secondSpinSteps = 30
 
     // 点数不足时的自动补助倒计时（绿色显示在右上角）
     private var autoRemain: TimeInterval = 0
@@ -236,17 +246,30 @@ final class GameView: UIView {
                 idleTick = 0
                 lampOn.toggle()
             }
-            // 逐格揭示：每隔一段时间揭示一格，全部跑完才结束
+            // 逐格揭示：跑灯顺时针跑到下一中奖格 → 亮起 → 停顿 → 再跑下一格
             if revealing {
-                revealTimer += dt
-                if revealTimer >= 0.5 {
-                    revealTimer = 0
-                    revealedCount += 1
-                    if revealedCount >= resultPositions.count {
-                        revealing = false
-                        SoundPlayer.shared.play("zha")
-                    } else {
-                        SoundPlayer.shared.play("loop")
+                if revealTraveling {
+                    revealTravelTimer += dt
+                    if revealTravelTimer >= 0.03 {
+                        revealTravelTimer = 0
+                        if lampIndex == revealTarget {
+                            revealTraveling = false
+                            revealedCount += 1
+                            if revealedCount >= resultPositions.count {
+                                revealing = false
+                                finishReveal()
+                            } else {
+                                SoundPlayer.shared.play("loop")
+                                revealHoldTimer = 0.22
+                            }
+                        } else {
+                            lampIndex = (lampIndex + 1) % 24
+                        }
+                    }
+                } else if revealHoldTimer > 0 {
+                    revealHoldTimer -= dt
+                    if revealHoldTimer <= 0 {
+                        startRevealTravel()
                     }
                 }
             }
@@ -266,6 +289,22 @@ final class GameView: UIView {
                 resolveGamble()
             }
         case .spinning:
+            // 龙/大奖项落地后的二次开奖：从龙头再跑一次灯
+            if secondSpin {
+                let progress = min(1, (now - secondSpinStart) / 2.0)
+                let eased: Double
+                if progress < 0.5 {
+                    eased = 2 * progress * progress
+                } else {
+                    eased = 1 - pow(-2 * progress + 2, 2) / 2
+                }
+                let step = Int(Double(secondSpinSteps) * eased)
+                lampIndex = (secondSpinFrom + step) % 24
+                if progress >= 1 {
+                    completeSecondSpin()
+                }
+                break
+            }
             let progress = min(1, (now - spinStartTime) / spinDuration)
             // 慢-快-慢（ease-in-out），与安卓跑灯节奏一致
             let eased: Double
@@ -313,20 +352,66 @@ final class GameView: UIView {
             return
         }
 
-        // 与安卓一致：无论本次是否押中都显示开奖格；进入逐格揭示（一格一格跑灯揭示，不是一次全亮）
+        // 与安卓一致：无论本次是否押中都显示开奖格
         phase = .result
         resultStartTime = now
         resultPositions = outcome.positions
         revealedCount = 0
-        revealTimer = 0
+        revealTraveling = false
+        revealHoldTimer = 0
         revealing = resultPositions.count > 0
         model.setWin(max(0, outcome.payout))
 
-        // 落龙触发二次开奖（type 16~21 都压到龙上）播放 boom
+        // 龙 / 大三元 / 小三元 / 小四喜 / 大满贯 / 小满贯：落龙后播 boom，再二次开奖跑灯
         if outcome.type >= 16 && outcome.type <= 21 {
             SoundPlayer.shared.play("boom")
+            SoundPlayer.shared.play("bswin")
+            secondSpin = true
+            secondSpinStart = now
+            secondSpinFrom = spinLanding
+            secondSpinTo = resultPositions.first ?? spinLanding
+            var steps = 26
+            let delta = (secondSpinTo - spinLanding + 24) % 24
+            while steps % 24 != delta { steps += 1 }
+            secondSpinSteps = steps
+            phase = .spinning
+            setNeedsDisplay()
+            return
         }
 
+        // 普通奖：直接逐格揭示（单格时立即亮起）
+        startRevealTravel()
+        setNeedsDisplay()
+    }
+
+    /// 龙落地后的二次开奖跑灯结束，开始逐格揭示
+    private func completeSecondSpin() {
+        secondSpin = false
+        lampIndex = secondSpinTo
+        phase = .result
+        startRevealTravel()
+        setNeedsDisplay()
+    }
+
+    /// 跑灯开始顺时针走向下一个待揭示的中奖格
+    private func startRevealTravel() {
+        guard revealing, revealedCount < resultPositions.count else {
+            revealing = false
+            finishReveal()
+            return
+        }
+        revealTarget = resultPositions[revealedCount]
+        revealTraveling = true
+        revealTravelTimer = 0
+    }
+
+    /// 全部中奖格揭示完成：播 zha + 中奖音效
+    private func finishReveal() {
+        if revealedCount > 0 {
+            SoundPlayer.shared.play("zha")
+        }
+        resultStartTime = CACurrentMediaTime()
+        guard let outcome = outcome else { return }
         if outcome.payout > 0 {
             if !model.vibrateDisabled {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -340,11 +425,6 @@ final class GameView: UIView {
                 SoundPlayer.shared.play("win")
             }
         }
-        // 大奖项横幅音效
-        if outcome.type >= 16 {
-            SoundPlayer.shared.play("bswin")
-        }
-        setNeedsDisplay()
     }
 
     // MARK: - 绘制
@@ -418,7 +498,10 @@ final class GameView: UIView {
                 let p = GameView.tiles[index]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
-            drawBanner(now: CACurrentMediaTime())
+            // 大奖项横幅：等中奖格全部揭示完才弹（和跑马灯开奖节奏一致）
+            if !revealing {
+                drawBanner(now: CACurrentMediaTime())
+            }
         }
 
         ctx.restoreGState()
@@ -442,12 +525,10 @@ final class GameView: UIView {
             // 押大小：左右竖排红灯交替亮，不点亮上下排
             for i in (gambleSide == 0 ? leftBand : rightBand) { draw(i) }
         case .result:
-            // 中奖：中间红灯 + 当前揭示格红灯一起闪烁
+            // 中奖：中间红灯 + 当前跑灯位置一起闪烁（揭示时跑灯逐格移动）
             if lampOn {
                 lamp.draw(in: CGRect(x: GameView.centerLamp.x, y: GameView.centerLamp.y, width: 24, height: 24))
-                let current = (revealedCount > 0 && revealedCount <= resultPositions.count)
-                    ? resultPositions[revealedCount - 1] : spinLanding
-                draw(current)
+                draw(lampIndex)
             }
         case .spinning:
             // 跑灯：只亮当前移动格对应的那颗灯
@@ -570,6 +651,11 @@ final class GameView: UIView {
             return
         }
 
+        // 逐格揭示 / 二次开奖期间不接受点击，避免跳过开奖动画
+        if phase == .result && revealing {
+            return
+        }
+
         // 长按快速押注期间释放手指，不再触发单次押注
         if wasRapid {
             return
@@ -663,6 +749,9 @@ final class GameView: UIView {
         gambleStartTime = CACurrentMediaTime()
         phase = .gamble
         revealing = false
+        revealTraveling = false
+        revealHoldTimer = 0
+        secondSpin = false
         gambleSide = 0
         gambleLampTimer = 0
         // 立即停止中奖音乐（安卓 j() 播放前先 z() 停掉上一段）
@@ -694,6 +783,7 @@ final class GameView: UIView {
             idleTick = 0
             revealedCount = resultPositions.count
             revealing = false
+            revealTraveling = false
             phase = .result
             SoundPlayer.shared.play("win")
             if !model.vibrateDisabled {
@@ -763,6 +853,9 @@ final class GameView: UIView {
         resultPositions = []
         revealedCount = 0
         revealing = false
+        revealTraveling = false
+        revealHoldTimer = 0
+        secondSpin = false
         phase = .idle
         setNeedsDisplay()
     }
