@@ -255,11 +255,15 @@ final class GameView: UIView {
                         if lampIndex == revealTarget {
                             revealTraveling = false
                             revealedCount += 1
-                            if revealedCount >= resultPositions.count {
+                            let done = revealedCount >= resultPositions.count
+                            // 安卓：跑到格并加入中奖列表时播 zha；大奖项每格都响
+                            if let o = outcome, o.type >= 16 {
+                                SoundPlayer.shared.play("zha")
+                            }
+                            if done {
                                 revealing = false
                                 finishReveal()
                             } else {
-                                SoundPlayer.shared.play("loop")
                                 revealHoldTimer = 0.22
                             }
                         } else {
@@ -365,7 +369,6 @@ final class GameView: UIView {
         // 龙 / 大三元 / 小三元 / 小四喜 / 大满贯 / 小满贯：落龙后播 boom，再二次开奖跑灯
         if outcome.type >= 16 && outcome.type <= 21 {
             SoundPlayer.shared.play("boom")
-            SoundPlayer.shared.play("bswin")
             secondSpin = true
             secondSpinStart = now
             secondSpinFrom = spinLanding
@@ -403,15 +406,24 @@ final class GameView: UIView {
         revealTarget = resultPositions[revealedCount]
         revealTraveling = true
         revealTravelTimer = 0
+        // 安卓 t()：开始跑向该中奖格时播 loop
+        if let outcome = outcome, outcome.type >= 16 {
+            SoundPlayer.shared.play("loop")
+        }
     }
 
     /// 全部中奖格揭示完成：播 zha + 中奖音效
     private func finishReveal() {
-        if revealedCount > 0 {
-            SoundPlayer.shared.play("zha")
-        }
         resultStartTime = CACurrentMediaTime()
         guard let outcome = outcome else { return }
+        // 大奖项每格揭示时已播 zha，这里只处理普通奖
+        if revealedCount > 0, outcome.type < 16 {
+            SoundPlayer.shared.play("zha")
+        }
+        // 安卓：中奖格全部揭示完播 bswin（大奖音效）
+        if outcome.type >= 16 {
+            SoundPlayer.shared.play("bswin")
+        }
         if outcome.payout > 0 {
             if !model.vibrateDisabled {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
