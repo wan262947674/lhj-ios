@@ -27,7 +27,8 @@ final class GameModel {
     static var xiaoSanYuanRate = 0
     static var sixiRate = 0
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let saveURL: URL
 
     private(set) var score: Int64 = 10
     private(set) var win: Int64 = 0
@@ -37,7 +38,32 @@ final class GameModel {
     private(set) var lastBets = [Int](repeating: 0, count: 8)
     /// 本局是否已下过注（对应安卓 ay；开奖后复位，首次下注时先清空旧注）
     private(set) var betPlaced = false
-    private var pool: Int64 = 0
+    private(set) var pool: Int32 = 0
+    private(set) var totalSpins: Int64 = 0
+    private(set) var maxWinScore: Int64 = 0
+    private(set) var maxGambleWinScore: Int64 = 0
+    private(set) var maxGambleWinStreak: Int64 = 0
+    private var gambleWinStreak: Int64 = 0
+    private var pendingWin: Int64?
+
+    private struct SaveState: Codable {
+        let version: Int
+        let score: Int64
+        let topScore: Int64
+        let win: Int64
+        let pool: Int32
+        let openBets: [Int]?
+        let pendingWin: Int64?
+        let totalSpins: Int64
+        let maxWinScore: Int64
+        let maxGambleWinScore: Int64
+        let maxGambleWinStreak: Int64
+    }
+
+    private struct SaveEnvelope: Codable {
+        let payload: Data
+        let checksum: String
+    }
 
     var soundDisabled: Bool {
         didSet { defaults.set(soundDisabled, forKey: "disSnd") }
@@ -46,16 +72,34 @@ final class GameModel {
         didSet { defaults.set(vibrateDisabled, forKey: "disVib") }
     }
 
-    private init() {
+    init(defaults: UserDefaults = .standard, saveURL: URL? = nil) {
+        self.defaults = defaults
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        self.saveURL = saveURL ?? support.appendingPathComponent("LHJ").appendingPathComponent("GameState-v1.plist")
         soundDisabled = defaults.bool(forKey: "disSnd")
         vibrateDisabled = defaults.bool(forKey: "disVib")
-        if defaults.object(forKey: "curScore") != nil {
-            score = Int64(defaults.double(forKey: "curScore"))
-            topScore = Int64(defaults.double(forKey: "topScore"))
-            win = Int64(defaults.double(forKey: "win"))
-            if score < 0 { score = 0 }
-        } else {
-            score = 10
+        if let state = Self.readSave(at: self.saveURL) {
+            score = state.score
+            topScore = state.topScore
+            win = state.pendingWin ?? state.win
+            pool = state.pool
+            totalSpins = state.totalSpins
+            maxWinScore = state.maxWinScore
+            maxGambleWinScore = state.maxGambleWinScore
+            maxGambleWinStreak = state.maxGambleWinStreak
+            if let openBets = state.openBets {
+                bets = openBets
+                betPlaced = true
+            }
+            // 动画中退出时恢复已确定的结果，不重复扣费或派奖。
+            if state.pendingWin != nil { save() }
+        } else if !FileManager.default.fileExists(atPath: self.saveURL.path) {
+            // 旧 iOS 将三个点数字段存为 Double；迁移保留原有数据。
+            score = Self.legacyPoints(defaults, key: "curScore") ?? 10
+            topScore = Self.legacyPoints(defaults, key: "topScore") ?? 0
+            win = Self.legacyPoints(defaults, key: "win") ?? 0
+            maxWinScore = win
             save()
         }
     }
@@ -78,84 +122,163 @@ final class GameModel {
     var totalBet: Int { bets.reduce(0, +) }
     var betKinds: Int { bets.filter { $0 > 0 }.count }
 
+    /// 单击 1 点；长按每次最多 3 点，受余额和单组 99 点上限约束。
     @discardableResult
-    func addBet(group: Int) -> Bool {
-        guard group >= 0, group < bets.count else { return false }
-        guard bets[group] < 99 else { return false }
-        guard score >= 1 else { return false }
-        // 本局第一次下注前，清空上一局遗留的押注（安卓 d(I)）
+    func addBet(group: Int, count: Int = 1) -> Int {
+        guard pendingWin == nil, bets.indices.contains(group), count > 0,
+              score > 0 || win > 0 else { return 0 }
+        // 安卓先清旧注再检查上限，否则上一局押满 99 会挡住同组新下注。
         if !betPlaced {
-            betPlaced = true
             bets = [Int](repeating: 0, count: bets.count)
         }
-        score -= 1
-        bets[group] += 1
+        let room = min(count, 99 - bets[group])
+        guard room > 0 else { return 0 }
+        moveWinToScore()
+        let placed = Int(min(Int64(room), score))
+        guard placed > 0 else { return 0 }
+        betPlaced = true
+        score -= Int64(placed)
+        bets[group] += placed
         save()
-        return true
-    }
-
-    func clearBets() {
-        bets = [Int](repeating: 0, count: 8)
-        save()
+        return placed
     }
 
     // MARK: - 结算
 
-    func setWin(_ value: Int64) {
-        win = max(0, value)
-        save()
-    }
-
     func collectWin() {
-        guard win > 0 else { return }
-        score += win
-        if score > topScore { topScore = score }
-        win = 0
+        guard pendingWin == nil, win > 0 else { return }
+        moveWinToScore()
+        if !betPlaced { bets = [Int](repeating: 0, count: bets.count) }
         save()
     }
 
     func addPoints(_ value: Int64) {
         guard value > 0 else { return }
-        score += value
-        if score > topScore { topScore = score }
+        score = Self.sum(score, value)
+        topScore = max(topScore, score)
         save()
     }
 
-    enum StartCheck {
-        case ok
-        case noScore       // 余额为 0
-        case noBet         // 上一局没有押注
-        case insufficient  // 余额不足
+    private func moveWinToScore() {
+        guard win > 0 else { return }
+        score = Self.sum(score, win)
+        topScore = max(topScore, score)
+        win = 0
+        gambleWinStreak = 0
     }
 
-    /// 点击开始时的校验/复押逻辑（对应安卓 onTouch 中 ay==false 的复押分支）
-    func tryStart() -> StartCheck {
-        if betPlaced {
-            // 本局已下注，点数在下注时已扣
-            return .ok
+    private static func sum(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int64.max : value
+    }
+
+    enum StartResult {
+        case started(Outcome)
+        case noScore, noBet, insufficient, busy
+    }
+
+    func beginSpin(currentLamp: Int) -> StartResult {
+        guard pendingWin == nil, win == 0 else { return .busy }
+        if !betPlaced {
+            let total = Int64(lastBets.reduce(0, +))
+            guard score > 0 else { return .noScore }
+            guard total > 0 else { return .noBet }
+            guard score >= total else { return .insufficient }
+            bets = lastBets
+            score -= total
         }
-        // 复押上一局方案
-        let total = lastBets.reduce(0, +)
-        if score == 0 { return .noScore }
-        if total <= 0 { return .noBet }
-        if score < Int64(total) { return .insufficient }
-        bets = lastBets
-        score -= Int64(total)
-        save()
-        return .ok
-    }
-
-    /// 开奖前提交本局押注（对应安卓 r()：保存上一局方案并复位 ay）
-    func commitSpin() {
         lastBets = bets
         betPlaced = false
+        gambleWinStreak = 0
+        totalSpins = Self.sum(totalSpins, 1)
+        let outcome = spin(currentLamp: currentLamp)
+        pendingWin = outcome.payout
+        maxWinScore = max(maxWinScore, outcome.payout)
         save()
+        return .started(outcome)
+    }
+
+    static func gambleChance(for win: Int64) -> Int {
+        // 安卓先判断 <20；后面的 <10 分支实际不可达。
+        if win > 500 { return 43 }
+        if win > 100 { return 45 }
+        if win < 20 { return 52 }
+        return 50
+    }
+
+    struct GambleOutcome {
+        let won: Bool
+        let number: Int
+    }
+
+    func beginGamble(isBig: Bool, roll: Int = Int.random(in: 0..<100),
+                     face: Int = Int.random(in: 1...6)) -> GambleOutcome? {
+        guard win > 0, pendingWin == nil else { return nil }
+        let won = roll < Self.gambleChance(for: win)
+        let number = (won == isBig) ? face + 7 : face
+        let payout = won ? Self.sum(win, win) : 0
+        pendingWin = payout
+        if won {
+            gambleWinStreak = Self.sum(gambleWinStreak, 1)
+            maxGambleWinStreak = max(maxGambleWinStreak, gambleWinStreak)
+            maxGambleWinScore = max(maxGambleWinScore, payout)
+            maxWinScore = max(maxWinScore, payout)
+        } else {
+            gambleWinStreak = 0
+        }
+        save()
+        return GambleOutcome(won: won, number: number)
+    }
+
+    func finishRoundAnimation() {
+        guard let payout = pendingWin else { return }
+        win = payout
+        pendingWin = nil
+        save()
+    }
+
+    private static func legacyPoints(_ defaults: UserDefaults, key: String) -> Int64? {
+        guard let number = defaults.object(forKey: key) as? NSNumber else { return nil }
+        if let integer = Int64(number.stringValue) { return max(0, integer) }
+        let value = number.doubleValue
+        guard value.isFinite, value >= 0 else { return 0 }
+        return value >= Double(Int64.max) ? Int64.max : Int64(value)
+    }
+
+    /// 本地完整性检测，不作为服务器或跨设备授权凭据。
+    private static func checksum(_ data: Data) -> String {
+        let value = data.reduce(UInt64(0xcbf29ce484222325)) { ($0 ^ UInt64($1)) &* 0x100000001b3 }
+        return String(value, radix: 16)
+    }
+
+    private static func readSave(at url: URL) -> SaveState? {
+        guard let data = try? Data(contentsOf: url),
+              let envelope = try? PropertyListDecoder().decode(SaveEnvelope.self, from: data),
+              envelope.checksum == checksum(envelope.payload),
+              let state = try? PropertyListDecoder().decode(SaveState.self, from: envelope.payload),
+              state.version == 1, state.score >= 0, state.topScore >= 0, state.win >= 0,
+              (state.pendingWin ?? 0) >= 0 else { return nil }
+        if let bets = state.openBets {
+            guard state.pendingWin == nil, state.win == 0, bets.count == 8,
+                  bets.allSatisfy({ (0...99).contains($0) }), bets.contains(where: { $0 > 0 }) else { return nil }
+        }
+        return state
     }
 
     private func save() {
-        defaults.set(Double(score), forKey: "curScore")
-        defaults.set(Double(topScore), forKey: "topScore")
-        defaults.set(Double(win), forKey: "win")
+        let state = SaveState(version: 1, score: score, topScore: topScore, win: win, pool: pool,
+                              openBets: betPlaced ? bets : nil, pendingWin: pendingWin, totalSpins: totalSpins,
+                              maxWinScore: maxWinScore, maxGambleWinScore: maxGambleWinScore,
+                              maxGambleWinStreak: maxGambleWinStreak)
+        do {
+            let encoder = PropertyListEncoder()
+            let payload = try encoder.encode(state)
+            let data = try encoder.encode(SaveEnvelope(payload: payload, checksum: Self.checksum(payload)))
+            try FileManager.default.createDirectory(at: saveURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: saveURL, options: .atomic)
+        } catch {
+            NSLog("LHJ game state save failed: %@", error.localizedDescription)
+        }
     }
 
     // MARK: - 开奖
@@ -203,7 +326,7 @@ final class GameModel {
         return -1
     }
 
-    func spin(currentLamp: Int = 0) -> Outcome {
+    private func spin(currentLamp: Int) -> Outcome {
         let total = totalBet
         let totalKind = betKinds
 
@@ -215,8 +338,9 @@ final class GameModel {
             acc += GameModel.buckets[i]
             if r < acc { level = i; break }
         }
-        pool += Int64(GameModel.poolRatio[level] * total)
-        let target = Int(clamping: pool / 100)
+        // 安卓 s_p 使用有符号 32 位整数，单位为 1/100 点。
+        pool = pool &+ Int32(GameModel.poolRatio[level] * total)
+        let target = Int(pool / 100)
 
         // 2. 计算 23 种中奖组合的金额
         var outs = [Int](repeating: 0, count: 23)
@@ -296,7 +420,7 @@ final class GameModel {
                 tries += 1
             } while outs[type] > threshold && tries < 300
         }
-        pool -= Int64(100 * outs[type])
+        pool = pool &- Int32(100 * outs[type])
 
         // 5. 生成中奖格
         var positions: [Int] = []

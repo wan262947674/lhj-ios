@@ -65,7 +65,7 @@ final class GameView: UIView {
     // 8 个投注格数字显示位置（右对齐边）
     private static let chipX: [CGFloat] = [59, 116, 173, 230, 287, 344, 401, 458]
     // 投注格点击分界
-    private static let chipHitX: [CGFloat] = [30, 87, 144, 201, 258, 315, 373, 430]
+    private static let chipHitX: [CGFloat] = [0, 68, 126, 182, 239, 296, 353, 410]
 
     private let startRect = CGRect(x: 336, y: 672, width: 133, height: 53)
     private let smallRect = CGRect(x: 10, y: 672, width: 90, height: 53)
@@ -140,18 +140,28 @@ final class GameView: UIView {
     // 押大小
     private var gambleStartTime: CFTimeInterval = 0
     private var gambleBig = false
-    private var gambleText: String = ""
+    private var gambleOutcome: GameModel.GambleOutcome?
+    private var gambleNumber: Int?
+    private static let gambleFrames: [CFTimeInterval] = [
+        0, 0.145, 0.255, 0.345, 0.464, 0.565, 0.684, 0.795,
+        0.955, 1.185, 1.455, 1.775, 2.175, 2.615, 3.115, 3.5
+    ]
+    private var gambleFrame = 0
 
     // 开奖红灯整体闪烁（每 4 帧切换，同安卓 ax）
     private var lampOn = true
     // 押大小：左右竖排红灯交替（0 左 / 1 右）
     private var gambleSide = 0
-    private var gambleLampTimer: TimeInterval = 0
 
     // 长按快速押注
-    private var pressedGroup: Int?
-    private var rapidTimer: Timer?
-    private var rapidActive = false
+    private enum TouchTarget: Equatable {
+        case bet(Int), start, small, big, menu, board, dragon
+    }
+    private weak var activeTouch: UITouch?
+    private var touchTarget: TouchTarget?
+    private var nextRapidBet: CFTimeInterval?
+    private static let rapidBetDelay: CFTimeInterval = 0.5
+    private static let rapidBetInterval: CFTimeInterval = 0.05
 
     private let toastLabel = UILabel()
 
@@ -190,6 +200,7 @@ final class GameView: UIView {
         if window != nil {
             startDisplayLink()
         } else {
+            cancelGameTouch()
             displayLink?.invalidate()
             displayLink = nil
         }
@@ -223,9 +234,13 @@ final class GameView: UIView {
         let now = CACurrentMediaTime()
         let dt = now - lastFrameTime
         lastFrameTime = now
-        if dt > 0.25 { return }
+        if UIApplication.shared.applicationState != .active || dt > 0.25 {
+            cancelGameTouch()
+            return
+        }
 
         updateAutoReward(dt)
+        updateRapidBet(now: now)
 
         switch phase {
         case .idle:
@@ -281,18 +296,13 @@ final class GameView: UIView {
                 }
             }
         case .gamble:
+            let frames = Self.gambleFrames
             let elapsed = now - gambleStartTime
-            // 押大小：左右竖排红灯与大/小文字一起按“先快后慢”交替
-            let total = 3.5
-            let progress = min(1, elapsed / total)
-            let interval = 0.05 + 0.36 * pow(progress, 2.4)
-            gambleLampTimer += dt
-            if gambleLampTimer >= interval {
-                gambleLampTimer = 0
+            while gambleFrame + 1 < frames.count, elapsed >= frames[gambleFrame + 1] {
+                gambleFrame += 1
                 gambleSide = 1 - gambleSide
-                gambleText = (gambleSide == 0) ? "大" : "小"
             }
-            if elapsed >= total {
+            if gambleFrame == frames.count - 1 {
                 resolveGamble()
             }
         case .spinning:
@@ -384,7 +394,7 @@ final class GameView: UIView {
         resultStartTime = CACurrentMediaTime()
         guard let outcome = outcome else { return }
         // 总分等全部格揭示完才显示（与安卓一致：最后跟音效一起出现）
-        model.setWin(max(0, outcome.payout))
+        model.finishRoundAnimation()
         // 大奖项每格揭示时已播 zha，这里只处理普通奖
         if revealedCount > 0, outcome.type < 16 {
             SoundPlayer.shared.play("zha")
@@ -448,8 +458,8 @@ final class GameView: UIView {
                        y: 621, minDigits: 2, spacing: 1)
         }
 
-        // 总注
-        drawNumber(Int64(model.totalBet), rightEdge: 257, y: 383, minDigits: 2, spacing: 2)
+        // 比大小与安卓一样在中央数码窗显示两位落点；揭晓前显示 00。
+        drawNumber(Int64(gambleNumber ?? model.totalBet), rightEdge: 257, y: 383, minDigits: 2, spacing: 2)
 
         // 跑灯 / 红灯（含押大小交替、中奖整体闪烁）
         drawLamps()
@@ -485,7 +495,7 @@ final class GameView: UIView {
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
             // 大奖项横幅：等中奖格全部揭示完才弹（和开火车开奖节奏一致）
-            if !revealing {
+            if !revealing && gambleNumber == nil {
                 drawBanner(now: CACurrentMediaTime())
             }
         }
@@ -505,6 +515,10 @@ final class GameView: UIView {
         let leftBand = [0, 18, 19, 20, 21, 22, 23]
         // 右侧竖排（含右上/右下角），同安卓 6..12
         let rightBand = [6, 7, 8, 9, 10, 11, 12]
+        if phase != .gamble, let number = gambleNumber, number > 0 {
+            for i in (number <= 6 ? leftBand : rightBand) { draw(i) }
+            return
+        }
 
         switch phase {
         case .gamble:
@@ -585,172 +599,126 @@ final class GameView: UIView {
 
     // MARK: - 触摸
 
-    /// 计算某个设计坐标点对应的下注组（盘面格或底部筹码区），未命中返回 nil
-    private func betGroup(at point: CGPoint) -> Int? {
-        if phase == .spinning || phase == .gamble || model.win > 0 { return nil }
-        for index in 0..<GameView.tiles.count {
-            let origin = GameView.tiles[index]
-            if CGRect(x: origin.x, y: origin.y, width: 60, height: 57).contains(point) {
-                return GameModel.group(for: GameModel.symbols[index])
+    private var acceptsGameTouch: Bool {
+        phase != .spinning && phase != .gamble && !revealing
+    }
+
+    private func target(at raw: CGPoint) -> TouchTarget {
+        let point = CGPoint(x: (raw.x - offset.x) / scaleX, y: (raw.y - offset.y) / scaleY)
+        if scorePanelRect.contains(point) || winPanelRect.contains(point) || menuRect.contains(point) { return .menu }
+        if startRect.contains(point) { return .start }
+        if smallRect.contains(point) { return .small }
+        if bigRect.contains(point) { return .big }
+        for (index, origin) in Self.tiles.enumerated() {
+            if CGRect(x: origin.x, y: origin.y, width: 60, height: 60).contains(point) {
+                let symbol = GameModel.symbols[index]
+                return symbol == 16 ? .dragon : .bet(GameModel.group(for: symbol))
             }
         }
-        if point.y > 560, point.y < 660 {
-            var index = GameView.chipHitX.count - 1
-            while index >= 0 && point.x < GameView.chipHitX[index] {
-                index -= 1
-            }
-            return 7 - index
+        if (560...660).contains(point.y), point.x < Self.designSize.width,
+           let index = Self.chipHitX.lastIndex(where: { point.x >= $0 }) {
+            return .bet(7 - index)
         }
-        return nil
+        return .board
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
-        let raw = touch.location(in: self)
-        let point = CGPoint(x: (raw.x - offset.x) / scaleX,
-                            y: (raw.y - offset.y) / scaleY)
-        guard let group = betGroup(at: point) else { return }
-        pressedGroup = group
-        rapidActive = false
-        rapidTimer?.invalidate()
-        let delayTimer = Timer(timeInterval: 0.4, repeats: false) { [weak self] _ in
-            self?.scheduleRapidBet()
+        guard acceptsGameTouch, activeTouch == nil, let touch = touches.first else { return }
+        let hit = target(at: touch.location(in: self))
+        activeTouch = touch
+        touchTarget = hit
+        // 安卓 ACTION_DOWN：按下立即下 1 点，松手不再追加。
+        if case .bet(let group) = hit, placeBet(group: group) > 0 {
+            nextRapidBet = CACurrentMediaTime() + Self.rapidBetDelay
         }
-        rapidTimer = delayTimer
-        RunLoop.main.add(delayTimer, forMode: .common)
     }
 
-    /// 长按延时结束后开始连续快速押注
-    private func scheduleRapidBet() {
-        guard let g = pressedGroup else { return }
-        rapidActive = true
-        rapidTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.13, repeats: true) { [weak self] _ in
-            self?.placeBet(group: g)
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        if !acceptsGameTouch || target(at: touch.location(in: self)) != touchTarget {
+            cancelGameTouch()
         }
-        rapidTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        placeBet(group: g)
+    }
+
+    private func updateRapidBet(now: CFTimeInterval) {
+        guard let next = nextRapidBet else { return }
+        guard acceptsGameTouch, let touch = activeTouch, let hit = touchTarget,
+              case .bet(let group) = hit, target(at: touch.location(in: self)) == hit else {
+            cancelGameTouch()
+            return
+        }
+        guard now >= next else { return }
+        let placed = placeBet(group: group, count: 3, isRepeat: true)
+        nextRapidBet = placed > 0 && model.score > 0 && model.bets[group] < 99
+            ? (now - next >= Self.rapidBetInterval ? now : next) + Self.rapidBetInterval
+            : nil
+    }
+
+    private func cancelGameTouch() {
+        activeTouch = nil
+        touchTarget = nil
+        nextRapidBet = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        rapidTimer?.invalidate()
-        rapidTimer = nil
-        pressedGroup = nil
-        rapidActive = false
+        if let touch = activeTouch, touches.contains(touch) { cancelGameTouch() }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
-        let raw = touch.location(in: self)
-        let point = CGPoint(x: (raw.x - offset.x) / scaleX,
-                            y: (raw.y - offset.y) / scaleY)
-
-        rapidTimer?.invalidate()
-        rapidTimer = nil
-        pressedGroup = nil
-        let wasRapid = rapidActive
-        rapidActive = false
-
-        if phase == .spinning || phase == .gamble {
-            return
-        }
-
-        // 逐格揭示 / 二次开奖期间不接受点击，避免跳过开奖动画
-        if phase == .result && revealing {
-            return
-        }
-
-        // 长按快速押注期间释放手指，不再触发单次押注
-        if wasRapid {
-            return
-        }
-
-        let hasWin = model.win > 0
-
-        // 顶部积分/中奖区、菜单按钮
-        if scorePanelRect.contains(point) || winPanelRect.contains(point) || menuRect.contains(point) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        let startedAt = touchTarget
+        let endedAt = target(at: touch.location(in: self))
+        cancelGameTouch()
+        guard acceptsGameTouch, startedAt == endedAt else { return }
+        switch endedAt {
+        case .menu:
             delegate?.gameViewDidRequestMenu(self)
-            return
-        }
-
-        // 小 / 大：中奖后押大小，赢了翻倍
-        if hasWin, smallRect.contains(point) {
+        case .small where model.win > 0:
             startGamble(isBig: false)
-            return
-        }
-        if hasWin, bigRect.contains(point) {
+        case .big where model.win > 0:
             startGamble(isBig: true)
-            return
-        }
-
-        if startRect.contains(point) {
-            if phase == .result || hasWin {
-                collect()
-            } else {
-                startSpin()
-            }
-            return
-        }
-
-        if phase == .result {
+        case .start:
+            if model.win > 0 { collect() } else { startSpin() }
+        case .board where model.win > 0:
             collect()
-            return
-        }
-
-        for index in 0..<GameView.tiles.count {
-            let origin = GameView.tiles[index]
-            if CGRect(x: origin.x, y: origin.y, width: 60, height: 57).contains(point) {
-                if hasWin {
-                    collect()
-                } else {
-                    let symbol = GameModel.symbols[index]
-                    placeBet(group: GameModel.group(for: symbol))
-                }
-                return
-            }
-        }
-
-        // 底部筹码区（与安卓 av~aw 命中区一致）
-        if point.y > 560, point.y < 660 {
-            if hasWin {
-                collect()
-                return
-            }
-            var index = GameView.chipHitX.count - 1
-            while index >= 0 && point.x < GameView.chipHitX[index] {
-                index -= 1
-            }
-            placeBet(group: 7 - index)
-            return
+        default:
+            break
         }
     }
 
-    private func placeBet(group: Int) {
-        guard group >= 0, group < 8 else { return }
-        if model.addBet(group: group) {
-            // 8 个下注格分别对应安卓 s1~s8
-            SoundPlayer.shared.play("s\(group + 1)")
-            if !model.vibrateDisabled {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    @discardableResult
+    private func placeBet(group: Int, count: Int = 1, isRepeat: Bool = false) -> Int {
+        guard acceptsGameTouch else { return 0 }
+        let placed = model.addBet(group: group, count: count)
+        if placed > 0 {
+            if phase == .result || gambleNumber != nil {
+                SoundPlayer.shared.stopAll()
+                stopShowingResult()
+            }
+            if !isRepeat {
+                SoundPlayer.shared.play("s\(group + 1)")
+                if !model.vibrateDisabled {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
             }
             setNeedsDisplay()
-        } else if model.score < 1 {
-            showToast("点数不足，请在菜单中购买点数")
-        } else {
-            showToast("该格已满注")
+        } else if !isRepeat {
+            showToast(model.score < 1 ? "点数不足，请在菜单中购买点数" : "该格已押满")
         }
+        return placed
     }
 
     // MARK: - 押大小
 
     private func startGamble(isBig: Bool) {
-        guard model.win > 0 else {
+        guard acceptsGameTouch, let result = model.beginGamble(isBig: isBig) else {
             showToast("中奖后才能押大小")
             return
         }
+        cancelGameTouch()
         gambleBig = isBig
-        gambleText = isBig ? "大" : "小"
+        gambleOutcome = result
+        gambleNumber = 0
         gambleStartTime = CACurrentMediaTime()
         phase = .gamble
         revealing = false
@@ -758,8 +726,8 @@ final class GameView: UIView {
         revealStageRemain = 0
         ringPhase = 0
         ringTimer = 0
-        gambleSide = 0
-        gambleLampTimer = 0
+        gambleSide = Int.random(in: 0...1)
+        gambleFrame = 0
         // 立即停止中奖音乐（安卓 j() 播放前先 z() 停掉上一段）
         SoundPlayer.shared.stopAll()
         // 安卓押大小固定播放 bs
@@ -768,22 +736,12 @@ final class GameView: UIView {
     }
 
     private func resolveGamble() {
-        let current = model.win
-        var chance = 50
-        if current > 500 {
-            chance = 43
-        } else if current > 100 {
-            chance = 45
-        } else if current < 10 {
-            chance = 55
-        } else if current < 20 {
-            chance = 52
-        }
+        guard let result = gambleOutcome else { return }
+        gambleOutcome = nil
+        gambleNumber = result.number
+        model.finishRoundAnimation()
 
-        let success = Int.random(in: 0..<100) < chance
-
-        if success {
-            model.setWin(current * 2)
+        if result.won {
             resultStartTime = CACurrentMediaTime()
             lampOn = true
             idleTick = 0
@@ -797,7 +755,7 @@ final class GameView: UIView {
             }
             showToast("押\(gambleBig ? "大" : "小")成功，中奖翻倍")
         } else {
-            model.setWin(0)
+            outcome = nil
             resultPositions = []
             phase = .idle
             SoundPlayer.shared.play("zha")
@@ -810,26 +768,24 @@ final class GameView: UIView {
     }
 
     private func startSpin() {
-        // 上一局中奖未收分时先入账（安卓点击开始时 addHoldAndSave）
-        if model.win > 0 {
-            model.collectWin()
-        }
-        switch model.tryStart() {
+        guard acceptsGameTouch else { return }
+        let result: GameModel.Outcome
+        switch model.beginSpin(currentLamp: lampIndex) {
         case .noScore, .insufficient:
-            model.clearBets()
             showToast("点数不足，请在菜单中购买点数")
             return
         case .noBet:
-            model.clearBets()
             showToast("请先在盘面下注")
             return
-        case .ok:
-            break
+        case .busy:
+            return
+        case .started(let spin):
+            result = spin
         }
 
-        model.commitSpin()
-        outcome = model.spin(currentLamp: lampIndex)
-        guard let result = outcome else { return }
+        cancelGameTouch()
+        stopShowingResult()
+        outcome = result
 
         spinStartTime = CACurrentMediaTime()
         spinStartIndex = lampIndex
@@ -855,8 +811,14 @@ final class GameView: UIView {
 
     private func collect() {
         model.collectWin()
+        stopShowingResult()
+        setNeedsDisplay()
+    }
+
+    private func stopShowingResult() {
         outcome = nil
         resultPositions = []
+        gambleNumber = nil
         revealedCount = 0
         revealing = false
         revealStage = .none
@@ -864,7 +826,6 @@ final class GameView: UIView {
         ringPhase = 0
         ringTimer = 0
         phase = .idle
-        setNeedsDisplay()
     }
 
     private func showToast(_ text: String) {
