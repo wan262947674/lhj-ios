@@ -21,9 +21,9 @@
         <string>iPhoneOS</string>
     </array>
     <key>CFBundleShortVersionString</key>
-    <string>1.28</string>
+    <string>1.29</string>
     <key>CFBundleVersion</key>
-    <string>39</string>
+    <string>40</string>
     <key>CFBundleIconFiles</key>
     <array>
         <string>icon.png</string>

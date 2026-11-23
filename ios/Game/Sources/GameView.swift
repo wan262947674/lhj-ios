@@ -124,20 +124,15 @@ final class GameView: UIView {
     private var resultStartTime: CFTimeInterval = 0
     private var resultPositions: [Int] = []
 
-    // 逐格揭示（对应安卓 state 7/8：中奖格一格一格跑灯揭示，不是一次全亮）
+    // 逐格揭示（对应安卓 state 7/8：龙/大奖项落地后，红灯交替闪烁 → 开一格 → 停留 → 再闪）
+    private enum RevealStage: Equatable { case none, landing, blink, open }
     private var revealedCount = 0
     private var revealing = false
-    // 逐格揭示时跑灯顺时针走到目标格
-    private var revealTraveling = false
-    private var revealTarget = 0
-    private var revealTravelTimer: CFTimeInterval = 0
-    private var revealHoldTimer: CFTimeInterval = 0
-    // 龙/大奖项落地后的二次开奖跑灯
-    private var secondSpin = false
-    private var secondSpinStart: CFTimeInterval = 0
-    private var secondSpinFrom = 0
-    private var secondSpinTo = 0
-    private var secondSpinSteps = 30
+    private var revealStage: RevealStage = .none
+    private var revealStageRemain: CFTimeInterval = 0
+    // 一圈红灯交替（安卓 j(Canvas)：每 4 帧奇偶灯互换）
+    private var ringPhase = 0
+    private var ringTimer: CFTimeInterval = 0
 
     // 点数不足时的自动补助倒计时（绿色显示在右上角）
     private var autoRemain: TimeInterval = 0
@@ -246,34 +241,42 @@ final class GameView: UIView {
                 idleTick = 0
                 lampOn.toggle()
             }
-            // 逐格揭示：跑灯顺时针跑到下一中奖格 → 亮起 → 停顿 → 再跑下一格
-            if revealing {
-                if revealTraveling {
-                    revealTravelTimer += dt
-                    if revealTravelTimer >= 0.03 {
-                        revealTravelTimer = 0
-                        if lampIndex == revealTarget {
-                            revealTraveling = false
-                            revealedCount += 1
-                            let done = revealedCount >= resultPositions.count
-                            // 安卓：跑到格并加入中奖列表时播 zha；大奖项每格都响
-                            if let o = outcome, o.type >= 16 {
-                                SoundPlayer.shared.play("zha")
-                            }
-                            if done {
-                                revealing = false
-                                finishReveal()
-                            } else {
-                                revealHoldTimer = 0.22
-                            }
+            // 一圈红灯交替闪烁（安卓 j(Canvas)：奇偶灯每 4 帧互换）
+            if revealStage == .blink {
+                ringTimer += dt
+                if ringTimer >= 0.067 {
+                    ringTimer = 0
+                    ringPhase = 1 - ringPhase
+                }
+            }
+            // 龙/大奖项揭示：落地停留 1.8s → 红灯闪烁 1.7s → 开一格 → 停留 1s → 下一格
+            if revealing, revealStage != .none {
+                revealStageRemain -= dt
+                if revealStageRemain <= 0 {
+                    switch revealStage {
+                    case .landing:
+                        if revealedCount >= resultPositions.count {
+                            revealing = false
+                            revealStage = .none
+                            finishReveal()
                         } else {
-                            lampIndex = (lampIndex + 1) % 24
+                            startRevealBlink()
                         }
-                    }
-                } else if revealHoldTimer > 0 {
-                    revealHoldTimer -= dt
-                    if revealHoldTimer <= 0 {
-                        startRevealTravel()
+                    case .blink:
+                        revealedCount += 1
+                        SoundPlayer.shared.play("zha")
+                        revealStage = .open
+                        revealStageRemain = 1.0
+                    case .open:
+                        if revealedCount >= resultPositions.count {
+                            revealing = false
+                            revealStage = .none
+                            finishReveal()
+                        } else {
+                            startRevealBlink()
+                        }
+                    case .none:
+                        break
                     }
                 }
             }
@@ -293,22 +296,6 @@ final class GameView: UIView {
                 resolveGamble()
             }
         case .spinning:
-            // 龙/大奖项落地后的二次开奖：从龙头再跑一次灯
-            if secondSpin {
-                let progress = min(1, (now - secondSpinStart) / 2.0)
-                let eased: Double
-                if progress < 0.5 {
-                    eased = 2 * progress * progress
-                } else {
-                    eased = 1 - pow(-2 * progress + 2, 2) / 2
-                }
-                let step = Int(Double(secondSpinSteps) * eased)
-                lampIndex = (secondSpinFrom + step) % 24
-                if progress >= 1 {
-                    completeSecondSpin()
-                }
-                break
-            }
             let progress = min(1, (now - spinStartTime) / spinDuration)
             // 慢-快-慢（ease-in-out），与安卓跑灯节奏一致
             let eased: Double
@@ -361,55 +348,36 @@ final class GameView: UIView {
         resultStartTime = now
         resultPositions = outcome.positions
         revealedCount = 0
-        revealTraveling = false
-        revealHoldTimer = 0
-        revealing = resultPositions.count > 0
         model.setWin(max(0, outcome.payout))
 
-        // 龙 / 大三元 / 小三元 / 小四喜 / 大满贯 / 小满贯：落龙后播 boom，再二次开奖跑灯
+        // 龙 / 大三元 / 小三元 / 小四喜 / 大满贯 / 小满贯：
+        // 安卓落龙后先停留 1.8s（横幅 + 落点格遮罩），再进入「红灯交替 → 开一格 → 停留」循环
         if outcome.type >= 16 && outcome.type <= 21 {
             SoundPlayer.shared.play("boom")
-            secondSpin = true
-            secondSpinStart = now
-            secondSpinFrom = spinLanding
-            secondSpinTo = resultPositions.first ?? spinLanding
-            var steps = 26
-            let delta = (secondSpinTo - spinLanding + 24) % 24
-            while steps % 24 != delta { steps += 1 }
-            secondSpinSteps = steps
-            phase = .spinning
+            revealing = true
+            revealStage = .landing
+            revealStageRemain = 1.8
             setNeedsDisplay()
             return
         }
 
-        // 普通奖：直接逐格揭示（单格时立即亮起）
-        startRevealTravel()
+        // 普通奖 / 开火车：立即揭示（安卓同帧结算，无逐格动画）
+        revealing = false
+        revealStage = .none
+        revealedCount = resultPositions.count
+        finishReveal()
         setNeedsDisplay()
     }
 
-    /// 龙落地后的二次开奖跑灯结束，开始逐格揭示
-    private func completeSecondSpin() {
-        secondSpin = false
-        lampIndex = secondSpinTo
-        phase = .result
-        startRevealTravel()
-        setNeedsDisplay()
-    }
-
-    /// 跑灯开始顺时针走向下一个待揭示的中奖格
-    private func startRevealTravel() {
-        guard revealing, revealedCount < resultPositions.count else {
-            revealing = false
-            finishReveal()
-            return
-        }
-        revealTarget = resultPositions[revealedCount]
-        revealTraveling = true
-        revealTravelTimer = 0
-        // 安卓 t()：开始跑向该中奖格时播 loop
-        if let outcome = outcome, outcome.type >= 16 {
-            SoundPlayer.shared.play("loop")
-        }
+    /// 红灯交替闪烁阶段（安卓 state 8：1.7s 后开下一格）
+    private func startRevealBlink() {
+        guard revealedCount < resultPositions.count else { return }
+        revealStage = .blink
+        revealStageRemain = 1.7
+        ringPhase = 0
+        ringTimer = 0
+        // 安卓 t()：开始新一轮闪烁时播 loop
+        SoundPlayer.shared.play("loop")
     }
 
     /// 全部中奖格揭示完成：播 zha + 中奖音效
@@ -487,31 +455,36 @@ final class GameView: UIView {
 
         // 旋转中：移动格叠加遮罩，与跑灯同一格同步（安卓 c(Canvas, aW)）
         if phase == .spinning {
-            // 开火车：从跑灯开始就显示火车多格遮挡，与红灯一起跑到结束
-            if let o = outcome, o.type == 22 {
-                for index in o.positions {
+            // 开火车：整段（3~6 格）遮挡素材一起跟着跑灯移动（安卓每帧重建 C = v, v-1, …）
+            if let o = outcome, o.type == 22, o.positions.count > 0 {
+                for k in 0..<o.positions.count {
+                    let index = ((lampIndex - k) % 24 + 24) % 24
                     guard index >= 0, index < GameView.tiles.count else { continue }
                     let p = GameView.tiles[index]
                     maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
                 }
-            }
-            if lampIndex >= 0, lampIndex < GameView.tiles.count {
+            } else if lampIndex >= 0, lampIndex < GameView.tiles.count {
                 let p = GameView.tiles[lampIndex]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
         }
 
-        // 中奖高亮（逐格揭示：只画已经揭示的格）+ 大奖项横幅
+        // 中奖高亮（只画已经揭示的格）+ 落点格遮罩 + 大奖项横幅
         if phase == .result {
-            let shown = revealing ? min(revealedCount, resultPositions.count) : resultPositions.count
+            let shown = min(revealedCount, resultPositions.count)
             for i in 0..<shown {
                 let index = resultPositions[i]
                 guard index >= 0, index < GameView.tiles.count else { continue }
                 let p = GameView.tiles[index]
                 maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
             }
-            // 大奖项横幅：等中奖格全部揭示完才弹（和跑马灯开奖节奏一致）
-            if !revealing {
+            // 落龙停留：落点格遮罩（安卓 k(Canvas) 的 c(Canvas, aW)）
+            if revealStage == .landing, lampIndex >= 0, lampIndex < GameView.tiles.count {
+                let p = GameView.tiles[lampIndex]
+                maskImage?.draw(in: CGRect(x: p.x, y: p.y, width: 60, height: 57))
+            }
+            // 横幅：落龙停留 / 开格停留 / 全部揭示完才显示（闪烁阶段隐藏，与安卓 aA=5/6 一致）
+            if !revealing || revealStage == .landing || revealStage == .open {
                 drawBanner(now: CACurrentMediaTime())
             }
         }
@@ -537,8 +510,13 @@ final class GameView: UIView {
             // 押大小：左右竖排红灯交替亮，不点亮上下排
             for i in (gambleSide == 0 ? leftBand : rightBand) { draw(i) }
         case .result:
-            // 中奖：中间红灯 + 当前跑灯位置一起闪烁（揭示时跑灯逐格移动）
-            if lampOn {
+            if revealStage == .blink {
+                // 一圈红灯奇偶交替（安卓 j(Canvas)：每 4 帧奇偶互换）
+                for i in 0..<GameView.lamps.count where i % 2 == ringPhase {
+                    draw(i)
+                }
+            } else if lampOn {
+                // 落龙停留 / 开格停留：中间红灯 + 当前格跑灯一起闪
                 lamp.draw(in: CGRect(x: GameView.centerLamp.x, y: GameView.centerLamp.y, width: 24, height: 24))
                 draw(lampIndex)
             }
@@ -761,9 +739,10 @@ final class GameView: UIView {
         gambleStartTime = CACurrentMediaTime()
         phase = .gamble
         revealing = false
-        revealTraveling = false
-        revealHoldTimer = 0
-        secondSpin = false
+        revealStage = .none
+        revealStageRemain = 0
+        ringPhase = 0
+        ringTimer = 0
         gambleSide = 0
         gambleLampTimer = 0
         // 立即停止中奖音乐（安卓 j() 播放前先 z() 停掉上一段）
@@ -795,7 +774,7 @@ final class GameView: UIView {
             idleTick = 0
             revealedCount = resultPositions.count
             revealing = false
-            revealTraveling = false
+            revealStage = .none
             phase = .result
             SoundPlayer.shared.play("win")
             if !model.vibrateDisabled {
@@ -865,9 +844,10 @@ final class GameView: UIView {
         resultPositions = []
         revealedCount = 0
         revealing = false
-        revealTraveling = false
-        revealHoldTimer = 0
-        secondSpin = false
+        revealStage = .none
+        revealStageRemain = 0
+        ringPhase = 0
+        ringTimer = 0
         phase = .idle
         setNeedsDisplay()
     }
