@@ -183,6 +183,26 @@ final class GameModel {
         return 9
     }
 
+    /// 大奖命中后按权重挑一个类型；返回 -1 表示无可用候选（回退普通随机）
+    private func pickBigPrize(totalKind: Int, outs: [Int], w22: Int) -> Int {
+        let candidates: [(code: Int, weight: Int)] = [
+            (20, totalKind >= 4 && outs[20] > 0 ? 100 : 0),        // 大满贯
+            (17, totalKind >= 2 && outs[17] > 0 ? 100 : 0),        // 大三元
+            (22, outs[22] > 0 && w22 > 3 ? 100 : 0),               // 开火车
+            (21, outs[21] > 0 ? GameModel.xiaoManGuanRate : 0),    // 小满贯
+            (18, outs[18] > 0 ? GameModel.xiaoSanYuanRate : 0),    // 小三元
+            (19, outs[19] > 0 ? GameModel.sixiRate : 0)            // 小四喜
+        ]
+        let totalWeight = candidates.reduce(0) { $0 + $1.weight }
+        guard totalWeight > 0 else { return -1 }
+        var roll = Int.random(in: 0..<totalWeight)
+        for item in candidates {
+            roll -= item.weight
+            if roll < 0 { return item.code }
+        }
+        return -1
+    }
+
     func spin(currentLamp: Int = 0) -> Outcome {
         let total = totalBet
         let totalKind = betKinds
@@ -256,23 +276,13 @@ final class GameModel {
         }
         outs[22] = sum22
 
-        // 3. 特殊大奖优先（按后台 winRate / dragonRate 触发；放宽安卓原版卡死大奖的返奖池/10倍条件，让几率真正生效）
+        // 3. 特殊大奖优先：龙按 dragonRate 独立判定；其余大奖先按 winRate 判定一次，命中后按权重选类型
         var type = -1
         if total > 0 {
-            if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 4, outs[20] > 0 {
-                type = 20   // 大满贯
-            } else if Int.random(in: 0..<100) < GameModel.dragonRate {
-                type = 16   // 龙（命中概率即落龙，不再要求随机格子上必须有押注）
-            } else if Int.random(in: 0..<100) < GameModel.winRate, totalKind >= 2, outs[17] > 0 {
-                type = 17   // 大三元
-            } else if Int.random(in: 0..<100) < GameModel.winRate, outs[22] > 0, w22 > 3 {
-                type = 22   // 开火车
-            } else if Int.random(in: 0..<100) < GameModel.xiaoManGuanRate, outs[21] > 0 {
-                type = 21   // 小满贯
-            } else if Int.random(in: 0..<100) < GameModel.xiaoSanYuanRate, outs[18] > 0 {
-                type = 18   // 小三元
-            } else if Int.random(in: 0..<100) < GameModel.sixiRate, outs[19] > 0 {
-                type = 19   // 小四喜
+            if Int.random(in: 0..<100) < GameModel.dragonRate {
+                type = 16   // 龙
+            } else if Int.random(in: 0..<100) < GameModel.winRate {
+                type = pickBigPrize(totalKind: totalKind, outs: outs, w22: w22)
             }
         }
 
