@@ -23,7 +23,7 @@
     <key>CFBundleShortVersionString</key>
     <string>1.23</string>
     <key>CFBundleVersion</key>
-    <string>33</string>
+    <string>34</string>
     <key>CFBundleIconFiles</key>
     <array>
         <string>icon.png</string>
