@@ -77,7 +77,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     private var adOpenedAt: Date?
 
     /// 广告观看最短时长（秒），与安卓 MoreActivity 的 adGate 一致
-    static let adGateSeconds = 15
+    static let adGateSeconds = 60
 
     init(action: Action) {
         self.action = action
@@ -535,9 +535,10 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     @objc private func closeTapped() {
         // 广告页倒计时未结束禁止返回
         if action == .ad, let opened = adOpenedAt {
-            let remaining = LHJWebViewController.adGateSeconds - Int(Date().timeIntervalSince(opened))
-            if remaining > 0 {
-                showAdGateAlert(remaining: remaining)
+            let elapsed = Date().timeIntervalSince(opened)
+            if elapsed < Double(LHJWebViewController.adGateSeconds) {
+                let left = max(0, Int(ceil(Double(LHJWebViewController.adGateSeconds) - elapsed)) - 1)
+                showAdGateAlert(remaining: left)
                 return
             }
         }
@@ -548,10 +549,15 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "广告还未看完",
-            message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(remaining) 秒",
+            message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(Self.clock(remaining))",
             preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "确定", style: .default))
         present(alert, animated: true, completion: nil)
+    }
+
+    static func clock(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        return String(format: "%02d:%02d", s / 60, s % 60)
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -573,6 +579,8 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
     private let titleLabel = UILabel()
     private let closeButton = UIButton(type: .system)
     private let indicator = UIActivityIndicatorView(style: .large)
+    private let countdownLabel = UILabel()
+    private var countdownTimer: Timer?
 
     init(title: String, url: URL, gateSeconds: Int = 0) {
         self.pageTitle = title
@@ -615,7 +623,40 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
         indicator.startAnimating()
         view.addSubview(indicator)
 
+        if gateSeconds > 0 {
+            countdownLabel.text = clockText()
+            countdownLabel.textColor = .white
+            countdownLabel.backgroundColor = UIColor(white: 0, alpha: 0.6)
+            countdownLabel.textAlignment = .center
+            countdownLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+            countdownLabel.layer.cornerRadius = 6
+            countdownLabel.clipsToBounds = true
+            view.addSubview(countdownLabel)
+            countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                self?.refreshCountdown()
+            }
+        }
+
         webView.load(URLRequest(url: pageURL))
+    }
+
+    deinit {
+        countdownTimer?.invalidate()
+    }
+
+    private func refreshCountdown() {
+        let elapsed = Date().timeIntervalSince(openedAt)
+        countdownLabel.text = clockText()
+        if elapsed >= Double(gateSeconds) {
+            countdownTimer?.invalidate()
+            countdownTimer = nil
+        }
+    }
+
+    private func clockText() -> String {
+        let elapsed = Date().timeIntervalSince(openedAt)
+        let left = max(0, Int(ceil(Double(gateSeconds) - elapsed)) - 1)
+        return LHJWebViewController.clock(left)
     }
 
     override func viewDidLayoutSubviews() {
@@ -628,6 +669,11 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
                                width: view.bounds.width,
                                height: view.bounds.height - top - bottom - 46)
         indicator.center = webView.center
+        if gateSeconds > 0 {
+            countdownLabel.frame = CGRect(x: view.bounds.width - 96,
+                                          y: view.bounds.height - bottom - 44,
+                                          width: 80, height: 30)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -638,12 +684,12 @@ final class LHJWebPageController: UIViewController, WKNavigationDelegate {
 
     @objc private func closeTapped() {
         if gateSeconds > 0 {
-            let remaining = gateSeconds - Int(Date().timeIntervalSince(openedAt))
-            if remaining > 0 {
+            let elapsed = Date().timeIntervalSince(openedAt)
+            if elapsed < Double(gateSeconds) {
                 guard presentedViewController == nil else { return }
                 let alert = UIAlertController(
                     title: "广告还未看完",
-                    message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(remaining) 秒",
+                    message: "请等待倒计时结束后再返回游戏界面。\n剩余 \(clockText())",
                     preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "确定", style: .default))
                 present(alert, animated: true, completion: nil)
