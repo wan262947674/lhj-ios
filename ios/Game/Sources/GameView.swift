@@ -529,10 +529,24 @@ final class GameView: UIView {
         }
     }
 
+    /// 龙(16)落地后的实际开奖格决定该显示哪种大奖横幅（如 4 个苹果 = 小四喜）
+    private var bannerType: Int {
+        guard let o = outcome else { return -1 }
+        if o.type != 16 { return o.type }
+        let syms = resultPositions.map { GameModel.symbols[$0] }
+        let set = Set(syms)
+        if syms.count == 4 && set == [0] { return 19 }                       // 小四喜：4 个零
+        if syms.count == 3 && set == [4, 5, 6] { return 17 }                 // 大三元
+        if syms.count == 3 && set == [1, 2, 3] { return 18 }                 // 小三元
+        if syms.count == 8 && set == Set(0...7) { return 20 }                // 大满贯
+        if syms.count == 8 && set == Set([0, 14] + Array(8...13)) { return 21 } // 小满贯
+        return -1
+    }
+
     private func drawBanner(now: CFTimeInterval) {
-        guard let outcome = outcome else { return }
+        guard outcome != nil else { return }
         let image: UIImage?
-        switch outcome.type {
+        switch bannerType {
         case 17: image = bannerDasy
         case 18: image = bannerXiaosy
         case 19: image = bannerXiaosx
