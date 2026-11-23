@@ -20,6 +20,8 @@ final class GameModel {
     static var winRate = 20
     // 龙大奖(16)触发概率（后台可调，默认 20）
     static var dragonRate = 20
+    // 龙中 0~11 格的权重（后台可调）
+    static var dragonWeights = [20, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
 
     private let defaults = UserDefaults.standard
 
@@ -196,9 +198,20 @@ final class GameModel {
         var outs = [Int](repeating: 0, count: 23)
         for i in 0..<16 { outs[i] = betAmount(for: i) }
 
-        // 16：龙 —— 1~11 个不同格（20% 概率 0 格）
-        var w16 = Int.random(in: 0..<11) + 1
-        if Int.random(in: 0..<100) < 20 { w16 = 0 }
+        // 16：龙 —— 按后台权重抽 0~11 格（权重和无效时退回 1~11 均匀 + 20% 空龙）
+        var w16 = 0
+        let weights = GameModel.dragonWeights
+        let weightSum = weights.reduce(0, +)
+        if weightSum > 0 {
+            var roll = Int.random(in: 0..<weightSum)
+            for (k, weight) in weights.enumerated() {
+                roll -= weight
+                if roll < 0 { w16 = k; break }
+            }
+        } else {
+            w16 = Int.random(in: 0..<11) + 1
+            if Int.random(in: 0..<100) < 20 { w16 = 0 }
+        }
         var pos16: [Int] = []
         var sum16 = 0
         var guard16 = 0

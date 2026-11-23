@@ -27,6 +27,20 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         static var moreURL = ""
         static var winRate = 20
         static var dragonRate = 20
+        /// 龙中 0~11 格各自的权重（后台可调，按比例分配）
+        static var dragonWeights = [20, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
+
+        /// 解析后台下发的 "20,7,7,..." 权重串
+        static func setDragonWeights(_ text: String) {
+            let parts = text.split(separator: ",").compactMap {
+                Int($0.trimmingCharacters(in: .whitespaces))
+            }
+            guard parts.count >= 12 else { return }
+            let list = parts.prefix(12).map { max(0, $0) }
+            guard list.reduce(0, +) > 0 else { return }
+            dragonWeights = list
+            GameModel.dragonWeights = list
+        }
     }
 
     /// 玩家当前积分（后台 points）
@@ -346,6 +360,9 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
             Config.dragonRate = rate
             GameModel.dragonRate = rate
         }
+        if fields.count >= 13 {
+            Config.setDragonWeights(fields[12])
+        }
 
         if self.action == .buy {
             if let url = LHJWebViewController.normalizedURL(Config.buyURL) {
@@ -442,6 +459,9 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                 if fields.count >= 12, let rate = Int(fields[11]) {
                     Config.dragonRate = rate
                     GameModel.dragonRate = rate
+                }
+                if fields.count >= 13 {
+                    Config.setDragonWeights(fields[12])
                 }
             }
         }.resume()
