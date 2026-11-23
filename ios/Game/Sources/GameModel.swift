@@ -224,6 +224,8 @@ final class GameModel {
             let p = Int.random(in: 0..<24)
             if GameModel.symbols[p] == 16 { continue }
             if pos16.contains(p) { continue }
+            // 只抽有押注的格，保证「亮灯格数 == 实际派奖格数」
+            if betAmount(for: GameModel.symbols[p]) <= 0 { continue }
             pos16.append(p)
             sum16 += betAmount(for: GameModel.symbols[p])
         }
