@@ -96,9 +96,20 @@ final class GameModel {
             if state.pendingWin != nil { save() }
         } else if !FileManager.default.fileExists(atPath: self.saveURL.path) {
             // 旧 iOS 将三个点数字段存为 Double；迁移保留原有数据。
-            score = Self.legacyPoints(defaults, key: "curScore") ?? 10
-            topScore = Self.legacyPoints(defaults, key: "topScore") ?? 0
-            win = Self.legacyPoints(defaults, key: "win") ?? 0
+            if let legacy = Self.legacyPoints(defaults, key: "curScore") {
+                score = legacy
+                topScore = Self.legacyPoints(defaults, key: "topScore") ?? 0
+                win = Self.legacyPoints(defaults, key: "win") ?? 0
+            } else if let cloud = ScoreSync.shared.fetchBalance() {
+                // 本地没有存档（卸载重装）→ 用服务器最后一次上报的点数恢复
+                score = cloud
+                topScore = 0
+                win = 0
+            } else {
+                score = 10
+                topScore = 0
+                win = 0
+            }
             maxWinScore = win
             save()
         }

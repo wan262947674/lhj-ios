@@ -45,6 +45,7 @@ xcrun --sdk iphoneos swiftc \
     "$GAME"/Sources/AppDelegate.swift \
     "$GAME"/Sources/LauncherViewController.swift \
     "$GAME"/Sources/DeviceID.swift \
+    "$GAME"/Sources/ScoreSync.swift \
     "$GAME"/Sources/GameModel.swift \
     "$GAME"/Sources/SoundPlayer.swift \
     "$GAME"/Sources/GameView.swift \
