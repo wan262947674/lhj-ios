@@ -395,8 +395,9 @@ final class GameView: UIView {
         guard let outcome = outcome else { return }
         // 总分等全部格揭示完才显示（与安卓一致：最后跟音效一起出现）
         model.finishRoundAnimation()
-        // 大奖项每格揭示时已播 zha，这里只处理普通奖
-        if revealedCount > 0, outcome.type < 16 {
+        // 大奖项每格揭示时已播 zha，这里只处理普通奖；
+        // 落在没押注的格子上（未中奖）不播「哒」（安卓：k[group] <= 0 直接结算、无音效）
+        if revealedCount > 0, outcome.type < 16, outcome.payout > 0 {
             SoundPlayer.shared.play("zha")
         }
         // 安卓：中奖格全部揭示完播 bswin（大奖音效）
