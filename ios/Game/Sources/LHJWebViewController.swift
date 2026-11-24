@@ -505,23 +505,35 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         }.resume()
     }
 
+    /// 进入游戏前的联网校验结果
+    enum ServerGateResult {
+        case ok
+        case banned
+        case unreachable
+    }
+
     /// 检测服务器是否可连接（进入游戏前的联网校验）
-    static func checkServer(_ completion: @escaping (Bool) -> Void) {
+    static func checkServer(_ completion: @escaping (ServerGateResult) -> Void) {
         guard let data = Data(base64Encoded: serverBase64),
               let base = String(data: data, encoding: .utf8),
-              let url = URL(string: base + "/LHJ/config?device=gate") else {
-            completion(false)
+              let url = URL(string: base + "/LHJ/config?device=" + DeviceID.value) else {
+            completion(.unreachable)
             return
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.dataTask(with: request) { data, response, _ in
-            var ok = false
-            if let http = response as? HTTPURLResponse, http.statusCode == 200, data != nil {
-                ok = true
+            var result = ServerGateResult.unreachable
+            if let http = response as? HTTPURLResponse {
+                if http.statusCode == 200 {
+                    result = .ok
+                } else if http.statusCode == 403 {
+                    // 服务器返回 403 表示该设备已被封禁
+                    result = .banned
+                }
             }
-            DispatchQueue.main.async { completion(ok) }
+            DispatchQueue.main.async { completion(result) }
         }.resume()
     }
 

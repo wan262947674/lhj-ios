@@ -40,21 +40,35 @@ final class GameViewController: UIViewController, GameViewDelegate {
 
     private func runServerGate() {
         showGateProgress()
-        LHJWebViewController.checkServer { [weak self] ok in
+        LHJWebViewController.checkServer { [weak self] result in
             guard let self = self else { return }
             self.hideGateProgress()
-            guard !ok else { return }
-            let alert = UIAlertController(
-                title: "无法连接服务器",
-                message: "网络未连接或服务器维护中，请检查网络后重试。",
-                preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
-                self?.runServerGate()
-            })
-            alert.addAction(UIAlertAction(title: "退出", style: .cancel) { _ in
-                exit(0)
-            })
-            self.present(alert, animated: true, completion: nil)
+            switch result {
+            case .ok:
+                return
+            case .banned:
+                // 服务端封禁：不允许进入游戏
+                let alert = UIAlertController(
+                    title: "无法进入游戏",
+                    message: "该设备已被封禁，如有疑问请联系客服。",
+                    preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "退出", style: .default) { _ in
+                    exit(0)
+                })
+                self.present(alert, animated: true, completion: nil)
+            case .unreachable:
+                let alert = UIAlertController(
+                    title: "无法连接服务器",
+                    message: "网络未连接或服务器维护中，请检查网络后重试。",
+                    preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+                    self?.runServerGate()
+                })
+                alert.addAction(UIAlertAction(title: "退出", style: .cancel) { _ in
+                    exit(0)
+                })
+                self.present(alert, animated: true, completion: nil)
+            }
         }
     }
 
