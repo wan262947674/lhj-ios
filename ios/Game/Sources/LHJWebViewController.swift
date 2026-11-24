@@ -112,7 +112,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         case .rank: return "高手排行榜"
         case .ach: return "成就列表"
         case .exchange: return "积分兑换点数"
-        case .ad: return "免费获取积分"
+        case .ad: return "免费获取点数"
         case .buy: return "购买卡密"
         }
     }
@@ -590,7 +590,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     }
 
     @objc private func signTapped() {
-        send("free", mode: .display)
+        send("free", mode: .points)
     }
 
     @objc private func claimTapped() {
@@ -632,6 +632,101 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
         return true
+    }
+}
+
+/// 幸运大转盘：网页盘面（CSS 绘制 + WebAudio 音效），中奖后由原生加到游戏点数
+final class LHJWheelController: UIViewController, WKNavigationDelegate {
+
+    /// 中奖点数回调
+    var onReward: ((Int64) -> Void)?
+
+    private let webView = WKWebView(frame: .zero)
+    private let titleLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let indicator = UIActivityIndicatorView(style: .large)
+
+    override var prefersStatusBarHidden: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red: 0x11 / 255.0, green: 0x11 / 255.0,
+                                      blue: 0x11 / 255.0, alpha: 1)
+
+        titleLabel.text = "幸运大转盘"
+        titleLabel.textColor = UIColor(red: 0xf5 / 255.0, green: 0xc4 / 255.0,
+                                       blue: 0x51 / 255.0, alpha: 1)
+        titleLabel.font = UIFont.boldSystemFont(ofSize: 20)
+        titleLabel.textAlignment = .center
+        view.addSubview(titleLabel)
+
+        closeButton.setTitle("关闭", for: .normal)
+        closeButton.setTitleColor(UIColor(red: 0xe9 / 255.0, green: 0xdc / 255.0,
+                                          blue: 0xc0 / 255.0, alpha: 1), for: .normal)
+        closeButton.titleLabel?.font = UIFont.systemFont(ofSize: 16)
+        closeButton.backgroundColor = UIColor(red: 0x22 / 255.0, green: 0x28 / 255.0,
+                                              blue: 0x33 / 255.0, alpha: 1)
+        closeButton.layer.cornerRadius = 6
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        view.addSubview(closeButton)
+
+        webView.backgroundColor = .black
+        webView.navigationDelegate = self
+        webView.allowsInlineMediaPlayback = true
+        view.addSubview(webView)
+
+        indicator.color = .white
+        indicator.startAnimating()
+        view.addSubview(indicator)
+
+        guard let data = Data(base64Encoded: LHJWebViewController.serverBase64),
+              let baseText = String(data: data, encoding: .utf8),
+              let base = URL(string: baseText) else {
+            indicator.stopAnimating()
+            return
+        }
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        components?.path = "/LHJ/wheel"
+        components?.queryItems = [URLQueryItem(name: "device", value: DeviceID.value)]
+        if let url = components?.url {
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let top = view.safeAreaInsets.top
+        let bottom = view.safeAreaInsets.bottom
+        titleLabel.frame = CGRect(x: 16, y: top + 8, width: view.bounds.width - 32, height: 30)
+        closeButton.frame = CGRect(x: view.bounds.width - 76, y: top + 8, width: 60, height: 30)
+        webView.frame = CGRect(x: 0, y: top + 46,
+                               width: view.bounds.width,
+                               height: view.bounds.height - top - bottom - 46)
+        indicator.center = webView.center
+    }
+
+    @objc private func closeTapped() {
+        dismiss(animated: true, completion: nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        indicator.stopAnimating()
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url, url.scheme == "lhjlhj" else {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        if url.host == "reward" {
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+            let amount = Int64(items?.first(where: { $0.name == "amount" })?.value ?? "") ?? 0
+            if amount > 0 { onReward?(amount) }
+        } else if url.host == "close" {
+            dismiss(animated: true, completion: nil)
+        }
     }
 }
 

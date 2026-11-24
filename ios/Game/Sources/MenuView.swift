@@ -62,8 +62,8 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
         configure(soundButton, title: soundTitle())
         configure(vibrateButton, title: vibrateTitle())
         configure(buyButton, title: "直接购买点数")
-        configure(freeButton, title: "免费获取积分")
-        configure(exchangeButton, title: "积分兑换点数")
+        configure(freeButton, title: "免费获取点数")
+        configure(exchangeButton, title: "幸运大转盘")
         configure(helpButton, title: "帮助")
         configure(moreButton, title: "更多游戏")
         configure(backButton, title: "返回游戏", gold: true)
@@ -123,7 +123,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
     }
 
     func updateTitle() {
-        titleLabel.text = "当前积分：\(LHJWebViewController.playerPoints)"
+        titleLabel.text = "当前点数：\(LHJWebViewController.playerPoints)"
     }
 
     override func layoutSubviews() {

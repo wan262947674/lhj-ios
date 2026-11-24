@@ -155,7 +155,7 @@ final class GameViewController: UIViewController, GameViewDelegate {
             self?.openWeb(.ad)
         }
         menu.onExchangePoints = { [weak self] in
-            self?.openWeb(.exchange)
+            self?.openWheel()
         }
         menu.onMore = { [weak self] in
             self?.openMoreGames()
@@ -195,6 +195,17 @@ final class GameViewController: UIViewController, GameViewDelegate {
 
     private func openWeb(_ action: LHJWebViewController.Action) {
         let controller = LHJWebViewController(action: action)
+        controller.modalPresentationStyle = .fullScreen
+        present(controller, animated: true, completion: nil)
+    }
+
+    /// 幸运大转盘（网页盘面 + 原生加点）
+    private func openWheel() {
+        let controller = LHJWheelController()
+        controller.onReward = { [weak self] amount in
+            GameModel.shared.addPoints(amount)
+            self?.gameView.setNeedsDisplay()
+        }
         controller.modalPresentationStyle = .fullScreen
         present(controller, animated: true, completion: nil)
     }
