@@ -8,6 +8,7 @@ final class ScoreSync {
 
     static let shared = ScoreSync()
 
+    /// 后台地址（与 LHJWebViewController 共用同一份 Base64）
     private var baseURL: String? {
         guard let data = Data(base64Encoded: LHJWebViewController.serverBase64) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -25,11 +26,9 @@ final class ScoreSync {
 
     /// 拉取服务器保存的点数；失败或非法返回 nil
     func fetchBalance(timeout: TimeInterval = 2.5) -> Int64? {
-        guard let base = baseURL,
-              var comps = URLComponents(string: base) else { return nil }
-        comps.path = "/LHJ/info"
-        comps.queryItems = [URLQueryItem(name: "device", value: DeviceID.value)]
-        guard let url = comps.url else { return nil }
+        guard let base = baseURL else { return nil }
+        let raw = base + "/LHJ/info?device=\(DeviceID.value)"
+        guard let url = URL(string: raw) else { return nil }
         guard let body = Self.syncGet(url: url, timeout: timeout) else { return nil }
         guard body.hasPrefix("OK|") else { return nil }
         let parts = body.dropFirst(3).components(separatedBy: "|")
@@ -39,16 +38,9 @@ final class ScoreSync {
 
     /// 上报当前点数（签名：md5(完整URL含ts + "|密钥")，sign 必须放最后）
     func report(score: Int64) {
-        guard let base = baseURL,
-              var comps = URLComponents(string: base) else { return }
-        comps.path = "/LHJ/score"
-        comps.queryItems = [
-            URLQueryItem(name: "device", value: DeviceID.value),
-            URLQueryItem(name: "balance", value: "\(score)"),
-            URLQueryItem(name: "ts", value: "\(Int(Date().timeIntervalSince1970))"),
-        ]
-        guard let unsigned = comps.url else { return }
-        let raw = unsigned.absoluteString
+        guard let base = baseURL else { return }
+        let ts = Int(Date().timeIntervalSince1970)
+        let raw = base + "/LHJ/score?device=\(DeviceID.value)&balance=\(score)&ts=\(ts)"
         let sign = LHJWebViewController.md5(raw + "|" + LHJWebViewController.signSecret)
         guard let url = URL(string: raw + "&sign=" + sign) else { return }
         var request = URLRequest(url: url)
