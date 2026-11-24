@@ -672,7 +672,6 @@ final class LHJWheelController: UIViewController, WKNavigationDelegate {
 
         webView.backgroundColor = .black
         webView.navigationDelegate = self
-        webView.allowsInlineMediaPlayback = true
         view.addSubview(webView)
 
         indicator.color = .white
