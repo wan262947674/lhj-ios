@@ -134,6 +134,9 @@ final class GameViewController: UIViewController, GameViewDelegate {
         menu.onAchievements = { [weak self] in
             self?.openWeb(.ach)
         }
+        menu.onNickname = { [weak self] in
+            self?.askNickname()
+        }
         menu.onFreePoints = { [weak self] in
             self?.openWeb(.ad)
         }
@@ -180,6 +183,56 @@ final class GameViewController: UIViewController, GameViewDelegate {
         let controller = LHJWebViewController(action: action)
         controller.modalPresentationStyle = .fullScreen
         present(controller, animated: true, completion: nil)
+    }
+
+    /// 弹出昵称输入框，调用后端 /LHJ/nickname 保存
+    private func askNickname() {
+        let alert = UIAlertController(title: "设置昵称", message: "设置后将显示在排行榜上（最多 12 个字符）", preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "请输入昵称"
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "保存", style: .default) { [weak self] _ in
+            guard let self = self,
+                  let name = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
+                  !name.isEmpty else { return }
+            self.setNickname(name)
+        })
+        present(alert, animated: true)
+    }
+
+    private func setNickname(_ name: String) {
+        guard let baseData = Data(base64Encoded: LHJWebViewController.serverBase64),
+              let base = String(data: baseData, encoding: .utf8),
+              let baseURL = URL(string: base) else { return }
+        var components = URLComponents()
+        components.scheme = baseURL.scheme
+        components.host = baseURL.host
+        components.port = baseURL.port
+        components.path = "/LHJ/nickname"
+        var items = [
+            URLQueryItem(name: "device", value: DeviceID.value),
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "ts", value: "\(Int(Date().timeIntervalSince1970))"),
+        ]
+        components.queryItems = items
+        guard let unsigned = components.url else { return }
+        let raw = unsigned.absoluteString
+        let sign = LHJWebViewController.md5(raw + "|" + LHJWebViewController.signSecret)
+        guard let url = URL(string: raw + "&sign=" + sign) else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            DispatchQueue.main.async {
+                let ok = text.hasPrefix("OK|")
+                let body = text.hasPrefix("OK|") ? String(text.dropFirst(3)) : text
+                let msg = ok ? "昵称已更新" : (text.components(separatedBy: "|").last ?? text)
+                let tip = UIAlertController(title: ok ? "成功" : "失败", message: msg, preferredStyle: .alert)
+                tip.addAction(UIAlertAction(title: "知道了", style: .default))
+                self?.present(tip, animated: true)
+            }
+        }.resume()
     }
 
     private func showHelp() {

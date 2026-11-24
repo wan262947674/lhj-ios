@@ -256,7 +256,8 @@ final class GameModel {
               let envelope = try? PropertyListDecoder().decode(SaveEnvelope.self, from: data),
               envelope.checksum == checksum(envelope.payload),
               let state = try? PropertyListDecoder().decode(SaveState.self, from: envelope.payload),
-              state.version == 1, state.score >= 0, state.topScore >= 0, state.win >= 0,
+              (1...2).contains(state.version),
+              state.score >= 0, state.topScore >= 0, state.win >= 0,
               (state.pendingWin ?? 0) >= 0 else { return nil }
         if let bets = state.openBets {
             guard state.pendingWin == nil, state.win == 0, bets.count == 8,

@@ -56,7 +56,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     }
 
     /// 后台地址（Base64，界面不展示）
-    private static let serverBase64 = "aHR0cDovLzEuMTE3LjIwNC4xMzc6ODA4MA=="
+    static let serverBase64 = "aHR0cDovLzEuMTE3LjIwNC4xMzc6ODA4MA=="
 
     /// 请求/回包签名密钥（与安卓 LhjSign 一致）
     static let signSecret = "LHJ@2026#sign"
@@ -123,9 +123,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         return base
     }
 
-    private var deviceID: String {
-        return UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
-    }
+    private var deviceID: String { DeviceID.value }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -439,7 +437,14 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     private func showError(_ text: String) {
         if text.hasPrefix("ERR|") {
             let parts = text.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
-            contentView.text = "提示：" + (parts.count > 2 ? String(parts[2]) : text)
+            let code = parts.count > 1 ? String(parts[1]) : ""
+            let msg = parts.count > 2 ? String(parts[2]) : text
+            contentView.text = "提示：" + msg
+            // WAIT 倒计时：禁用领取按钮，提示玩家需等待
+            if code == "WAIT", action == .ad {
+                claimButton.isEnabled = false
+                claimButton.setTitle(msg, for: .normal)
+            }
         } else {
             contentView.text = text.isEmpty ? "提示：请求失败，请重试" : text
         }
@@ -449,8 +454,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     static func fetchConfig() {
         guard let data = Data(base64Encoded: LHJWebViewController.serverBase64),
               let base = String(data: data, encoding: .utf8),
-              let url = URL(string: base + "/LHJ/config?device=" +
-                            (UIDevice.current.identifierForVendor?.uuidString ?? "unknown")) else { return }
+              let url = URL(string: base + "/LHJ/config?device=" + DeviceID.value) else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         URLSession.shared.dataTask(with: request) { data, _, _ in
@@ -525,8 +529,7 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
     static func fetchInfo(_ completion: (() -> Void)? = nil) {
         guard let data = Data(base64Encoded: serverBase64),
               let base = String(data: data, encoding: .utf8),
-              let url = URL(string: base + "/LHJ/info?device=" +
-                            (UIDevice.current.identifierForVendor?.uuidString ?? "unknown")) else { return }
+              let url = URL(string: base + "/LHJ/info?device=" + DeviceID.value) else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         URLSession.shared.dataTask(with: request) { data, _, _ in

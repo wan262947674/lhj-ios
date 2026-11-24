@@ -124,7 +124,7 @@ final class RedeemViewController: UIViewController, UITextFieldDelegate {
         setStatus("正在兑换，请稍候...")
         redeemButton.isEnabled = false
 
-        let device = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+        let device = DeviceID.value
         let body = "card=\(RedeemViewController.encode(card))"
             + "&device=\(RedeemViewController.encode(device))"
             + "&pkg=\(RedeemViewController.encode("lhj.baolei.in"))"

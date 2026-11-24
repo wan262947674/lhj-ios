@@ -11,6 +11,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
     var onFreePoints: (() -> Void)?
     var onExchangePoints: (() -> Void)?
     var onMore: (() -> Void)?
+    var onNickname: (() -> Void)?
 
     private let panel = UIView()
     private let titleLabel = UILabel()
@@ -18,6 +19,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
 
     private let leaderButton = UIButton(type: .system)
     private let achievementButton = UIButton(type: .system)
+    private let nicknameButton = UIButton(type: .system)
     private let soundButton = UIButton(type: .system)
     private let vibrateButton = UIButton(type: .system)
     private let buyButton = UIButton(type: .system)
@@ -56,6 +58,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
 
         configure(leaderButton, title: "高手排行榜")
         configure(achievementButton, title: "成就列表")
+        configure(nicknameButton, title: "设置昵称")
         configure(soundButton, title: soundTitle())
         configure(vibrateButton, title: vibrateTitle())
         configure(buyButton, title: "直接购买点数")
@@ -67,6 +70,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
 
         leaderButton.addTarget(self, action: #selector(leaderTapped), for: .touchUpInside)
         achievementButton.addTarget(self, action: #selector(achievementTapped), for: .touchUpInside)
+        nicknameButton.addTarget(self, action: #selector(nicknameTapped), for: .touchUpInside)
         soundButton.addTarget(self, action: #selector(soundTapped), for: .touchUpInside)
         vibrateButton.addTarget(self, action: #selector(vibrateTapped), for: .touchUpInside)
         buyButton.addTarget(self, action: #selector(buyTapped), for: .touchUpInside)
@@ -131,6 +135,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
         let titleHeight: CGFloat = 34
         let rows: [[UIButton]] = [
             [leaderButton, achievementButton],
+            [nicknameButton],
             [soundButton, vibrateButton],
             [buyButton],
             [freeButton, exchangeButton],
@@ -183,6 +188,7 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func leaderTapped() { onRank?() }
     @objc private func achievementTapped() { onAchievements?() }
+    @objc private func nicknameTapped() { onNickname?() }
 
     @objc private func soundTapped() {
         GameModel.shared.soundDisabled.toggle()
