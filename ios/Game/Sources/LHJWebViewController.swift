@@ -430,6 +430,9 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                 message = String(message[..<range.lowerBound])
             }
             contentView.text = message
+            // 领完奖励后重置门控标志，必须再看一次广告才能再领
+            adWatched = false
+            claimButton.isEnabled = false
         }
     }
 
