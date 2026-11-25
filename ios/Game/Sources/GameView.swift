@@ -326,6 +326,11 @@ final class GameView: UIView {
     /// 点数低于后台阈值时，按间隔自动补点（右上角绿色倒计时）
     private func updateAutoReward(_ dt: CFTimeInterval) {
         let config = LHJWebViewController.Config.self
+        // 后台关闭自动补助时不再补点（此前只判断阈值，开关形同虚设）
+        guard config.autoEnabled else {
+            autoRemain = 0
+            return
+        }
         let threshold = Int64(max(1, config.autoThreshold))
         let interval = TimeInterval(max(1, config.autoInterval))
         guard model.score < threshold else {
