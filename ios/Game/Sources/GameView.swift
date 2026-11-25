@@ -403,15 +403,16 @@ final class GameView: UIView {
         if outcome.payout > 0, !model.vibrateDisabled {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
-        // 龙/大三元等逐格大奖（16~21）：zha 已在每格揭示时播放，
-        // 全部开完只播 bswin，不再叠加随机中奖音乐（安卓 w()）
-        if outcome.type >= 16 && outcome.type <= 21 {
-            SoundPlayer.shared.play("bswin")
-            return
-        }
-        // 开火车未押中：安卓走 w()，u>=16 播 bswin
-        if outcome.type == 22 && outcome.payout <= 0 {
-            SoundPlayer.shared.play("bswin")
+        // 大奖类（龙/大三元/小三元/小四喜/大满贯/小满贯/开火车，16~22）：
+        // 只要开出了中奖格就播中奖音乐；只有空龙（一格没开）才是未中奖音效。
+        // 不能按 payout 判断——龙/开火车的中奖格取自盘面，玩家没押到那些格子时
+        // payout 也可能为 0，但画面已经展示中奖横幅，音效必须是中奖音乐。
+        if outcome.type >= 16 {
+            if outcome.positions.isEmpty {
+                SoundPlayer.shared.play("bswin")
+            } else {
+                SoundPlayer.shared.play("w\(Int.random(in: 1...7))")
+            }
             return
         }
         // 普通奖/开火车押中：安卓 x()→y()，普通奖不播 zha
