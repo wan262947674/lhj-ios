@@ -389,33 +389,36 @@ final class GameView: UIView {
         SoundPlayer.shared.play("loop")
     }
 
-    /// 全部中奖格揭示完成：播 zha + 中奖音效
+    /// 全部中奖格揭示完成：播中奖音效（对齐安卓 w()/x()/y()）
     private func finishReveal() {
         resultStartTime = CACurrentMediaTime()
         guard let outcome = outcome else { return }
         // 总分等全部格揭示完才显示（与安卓一致：最后跟音效一起出现）
         model.finishRoundAnimation()
-        // 大奖项每格揭示时已播 zha，这里只处理普通奖；
-        // 落在没押注的格子上（未中奖）不播「哒」（安卓：k[group] <= 0 直接结算、无音效）
-        if revealedCount > 0, outcome.type < 16, outcome.payout > 0 {
-            SoundPlayer.shared.play("zha")
+        if outcome.payout > 0, !model.vibrateDisabled {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
-        // 安卓：中奖格全部揭示完播 bswin（大奖音效）
-        if outcome.type >= 16 {
+        // 龙/大三元等逐格大奖（16~21）：zha 已在每格揭示时播放，
+        // 全部开完只播 bswin，不再叠加随机中奖音乐（安卓 w()）
+        if outcome.type >= 16 && outcome.type <= 21 {
             SoundPlayer.shared.play("bswin")
+            return
         }
-        if outcome.payout > 0 {
-            if !model.vibrateDisabled {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            }
-            // 中奖音效：普通奖随机 w1~w7；特殊奖 50% win，否则随机 w1~w7
-            let useRandomWin = outcome.type < 14
-                || outcome.type == 4 || outcome.type == 6 || outcome.type == 7
-            if useRandomWin || Int.random(in: 0..<2) == 1 {
-                SoundPlayer.shared.play("w\(Int.random(in: 1...7))")
-            } else {
-                SoundPlayer.shared.play("win")
-            }
+        // 开火车未押中：安卓走 w()，u>=16 播 bswin
+        if outcome.type == 22 && outcome.payout <= 0 {
+            SoundPlayer.shared.play("bswin")
+            return
+        }
+        // 普通奖/开火车押中：安卓 x()→y()，普通奖不播 zha
+        guard outcome.payout > 0 else { return }
+        // 安卓 y()：type>=14 或 4/6/7 必随机 w1~w7；
+        // 其余小奖 50% 播 win，否则随机 w1~w7
+        let useRandomWin = outcome.type >= 14
+            || outcome.type == 4 || outcome.type == 6 || outcome.type == 7
+        if useRandomWin || Int.random(in: 0..<2) == 1 {
+            SoundPlayer.shared.play("w\(Int.random(in: 1...7))")
+        } else {
+            SoundPlayer.shared.play("win")
         }
     }
 
