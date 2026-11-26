@@ -94,6 +94,10 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
         tap.delegate = self
         addGestureRecognizer(tap)
 
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(creditDidChange(_:)),
+                                               name: GameModel.creditDidChange,
+                                               object: nil)
         updateTitle()
     }
 
@@ -122,8 +126,12 @@ final class MenuView: UIView, UIGestureRecognizerDelegate {
         return GameModel.shared.vibrateDisabled ? "开启震动" : "关闭震动"
     }
 
-    func updateTitle() {
-        titleLabel.text = "当前点数：\(LHJWebViewController.playerPoints)"
+    private func updateTitle() {
+        titleLabel.text = "当前点数：\(GameModel.shared.score)"
+    }
+
+    @objc private func creditDidChange(_ notification: Notification) {
+        updateTitle()
     }
 
     override func layoutSubviews() {

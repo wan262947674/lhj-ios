@@ -28,7 +28,6 @@ final class GameViewController: UIViewController, GameViewDelegate {
             didPlayOpen = true
             // 安卓启动进入游戏时播放 open
             SoundPlayer.shared.play("open")
-            LHJWebViewController.fetchInfo()
         }
         if !gateChecked {
             gateChecked = true
@@ -162,9 +161,6 @@ final class GameViewController: UIViewController, GameViewDelegate {
         }
         view.addSubview(menu)
         menuView = menu
-        LHJWebViewController.fetchInfo { [weak self] in
-            self?.menuView?.updateTitle()
-        }
     }
 
     private func openMoreGames() {

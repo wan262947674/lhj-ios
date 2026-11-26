@@ -46,9 +46,6 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         }
     }
 
-    /// 玩家当前积分（后台 points）
-    static private(set) var playerPoints: Int64 = 0
-
     private enum Mode {
         case display
         case config
@@ -534,26 +531,6 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
                 }
             }
             DispatchQueue.main.async { completion(result) }
-        }.resume()
-    }
-
-    /// 拉取玩家当前积分（菜单里的“当前积分”）
-    static func fetchInfo(_ completion: (() -> Void)? = nil) {
-        guard let data = Data(base64Encoded: serverBase64),
-              let base = String(data: data, encoding: .utf8),
-              let url = URL(string: base + "/LHJ/info?device=" + DeviceID.value) else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            guard let data = data, let text = String(data: data, encoding: .utf8),
-                  text.hasPrefix("OK|") else { return }
-            let body = String(text.dropFirst(3))
-            let fields = body.components(separatedBy: "|")
-            guard let points = Int64(fields.first ?? "") else { return }
-            DispatchQueue.main.async {
-                playerPoints = points
-                completion?()
-            }
         }.resume()
     }
 

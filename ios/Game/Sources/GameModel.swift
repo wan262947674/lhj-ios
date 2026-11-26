@@ -4,6 +4,7 @@ import Foundation
 final class GameModel {
 
     static let shared = GameModel()
+    static let creditDidChange = Notification.Name("LHJGameCreditDidChange")
 
     // 盘面 24 格对应的符号（索引与 GameBody.e 完全一致）
     static let symbols: [Int] = [
@@ -30,7 +31,12 @@ final class GameModel {
     private let defaults: UserDefaults
     private let saveURL: URL
 
-    private(set) var score: Int64 = 10
+    private(set) var score: Int64 = 10 {
+        didSet {
+            guard score != oldValue else { return }
+            NotificationCenter.default.post(name: Self.creditDidChange, object: self)
+        }
+    }
     private(set) var win: Int64 = 0
     private(set) var topScore: Int64 = 0
     private(set) var bets = [Int](repeating: 0, count: 8)
