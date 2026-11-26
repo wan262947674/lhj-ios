@@ -296,7 +296,8 @@ final class LHJWebViewController: UIViewController, UITextFieldDelegate {
         var items = [
             URLQueryItem(name: "device", value: deviceID),
             URLQueryItem(name: "hold", value: "\(GameModel.shared.score)"),
-            URLQueryItem(name: "topScore", value: "\(GameModel.shared.topScore)")
+            URLQueryItem(name: "topScore", value: "\(GameModel.shared.topScore)"),
+            URLQueryItem(name: "win", value: "\(GameModel.shared.maxWinScore)")
         ]
         if name == "exchange" {
             items.append(URLQueryItem(name: "points", value: inputField.text ?? ""))
